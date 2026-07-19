@@ -661,6 +661,41 @@ function togglePassVis(id, el){ var i=document.getElementById(id); if(i.type==='
 // ============================================================
 var GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw-xqexa0DuQcJZdcN2AKh4ndxE05BUSDchE2CRs5RlNHjV-FB_D6D3sP_0jj3EsED3Mg/exec';
 
+// Panggil BEBERAPA fungsi RPC yang SALING BEBAS sekaligus dalam SATU
+// request HTTP (dibaca oleh mode "batch" di doPost() Code.gs), menggantikan
+// pola Promise.all([gasCall(...), gasCall(...), ...]). Karena file ini
+// di-host di luar Apps Script, tiap gasCall() terpisah membayar 1 round-
+// trip HTTP PENUH (termasuk redirect internal ke googleusercontent.com) ke
+// Google -- kalau ada 3-4 panggilan independen dibutuhkan bersamaan (mis.
+// saat memuat 1 halaman), menggabungkannya jadi 1 request jauh lebih cepat
+// daripada N request paralel.
+// calls: [{fn:'namaFungsi', args:[...]}, ...]
+// Return: Promise -> array hasil, urutan SAMA PERSIS dengan urutan calls
+// (jadi kode pemanggil yang sebelumnya pakai Promise.all([...]).then(function(hasil){
+// var a=hasil[0], b=hasil[1]; ... }) TIDAK PERLU diubah strukturnya).
+function gasCallBatch(calls){
+  if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.indexOf('TEMPEL_URL_WEB_APP') !== -1) {
+    return Promise.reject(new Error('GAS_WEB_APP_URL belum diisi.'));
+  }
+  return fetch(GAS_WEB_APP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ calls: calls })
+  })
+  .then(function(resp){
+    if (!resp.ok) throw new Error('Server merespons HTTP ' + resp.status + '.');
+    return resp.text();
+  })
+  .then(function(text){
+    var data;
+    try { data = JSON.parse(text); }
+    catch (eParse) { throw new Error('Respons server tidak valid (bukan JSON).'); }
+    if (!data || !data.success || !Array.isArray(data.results)) throw new Error((data && data.message) || 'Gagal memproses batch.');
+    return data.results;
+  })
+  .catch(function(err){ throw (err instanceof Error) ? err : new Error(String(err)); });
+}
+
 function gasCall(fnName){
   var args = Array.prototype.slice.call(arguments, 1);
   if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.indexOf('TEMPEL_URL_WEB_APP') !== -1) {
@@ -812,7 +847,11 @@ function afterLogin(){
 
   // 2) Ambil data terbaru dari server di belakang layar
   showBar();
-  Promise.all([ gasCall('getDaftarTahun', STATE.token), gasCall('getMyPos', STATE.token), gasCall('getSetup', STATE.token) ]).then(function(res){
+  gasCallBatch([
+    { fn:'getDaftarTahun', args:[STATE.token] },
+    { fn:'getMyPos', args:[STATE.token] },
+    { fn:'getSetup', args:[STATE.token] }
+  ]).then(function(res){
     hideLoading(); hideBar();
     var thn = res[0], pos = res[1], setup = res[2];
     STATE.daftarTahun = thn.data || []; STATE.tahunAktif = thn.tahunAktif || (STATE.daftarTahun[STATE.daftarTahun.length-1]);
@@ -2111,11 +2150,11 @@ function loadKonsolidasi(){
   var namaBulanLabel = BULAN_NAMA[Number(bulan)-1] + ' ' + STATE.tahunAktif;
   document.getElementById('rp-bulan-label').textContent = namaBulanLabel;
   document.getElementById('rk-bulan-label').textContent = namaBulanLabel;
-  Promise.all([
-    gasCall('getRekapBulan', STATE.tahunAktif, bulan, STATE.token),
-    gasCall('getRekonsiliasi', STATE.tahunAktif, bulan, STATE.token),
-    gasCall('getTambahanBulan', STATE.tahunAktif, bulan, STATE.token),
-    gasCall('getKategoriTambahanList', STATE.token)
+  gasCallBatch([
+    { fn:'getRekapBulan', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getRekonsiliasi', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getTambahanBulan', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getKategoriTambahanList', args:[STATE.token] }
   ]).then(function(hasil){
     var res = hasil[0], rek = hasil[1], tb = hasil[2], katRes = hasil[3];
     if(!res.success){ toast('error', res.message); return; }
@@ -2649,9 +2688,9 @@ function cetakKonsolidasi(){
 var _unitPosData = { units:[], pos:[] };
 function loadUnitPos(){
   showBar();
-  Promise.all([
-    gasCall('getUnitPosList', STATE.token),
-    gasCall('getKategoriTambahanList', STATE.token)
+  gasCallBatch([
+    { fn:'getUnitPosList', args:[STATE.token] },
+    { fn:'getKategoriTambahanList', args:[STATE.token] }
   ]).then(function(hasil){
     hideBar();
     var res = hasil[0], katRes = hasil[1];
@@ -2867,7 +2906,7 @@ function hapusKategoriTambahan(kode){
 // ============================================================
 function loadUserView(){
   showBar();
-  Promise.all([ gasCall('getUserList', STATE.token), gasCall('getUnitPosList', STATE.token) ]).then(function(res){
+  gasCallBatch([ { fn:'getUserList', args:[STATE.token] }, { fn:'getUnitPosList', args:[STATE.token] } ]).then(function(res){
     hideBar();
     var users = res[0], unitPos = res[1];
     if(!users.success){ toast('error', users.message); return; }
@@ -3018,17 +3057,27 @@ function loadJurnalMemorial(){
   var bulan = document.getElementById('sel-bulan-memorial').value;
   if(!bulan) return;
   showBar();
-  // Semua panggilan jalan BERSAMAAN (bukan tunggu status kunci dulu baru
-  // mulai tarik data) — ini yang bikin ganti bulan jauh lebih cepat. Kalau
-  // ternyata terkunci, hasil data mentahnya tinggal dibuang, tidak masalah
-  // (lebih murah daripada menunggu 2x giliran bolak-balik ke server).
-  Promise.all([
-    gasCall('getStatusJurnalMemorial', STATE.tahunAktif, bulan, STATE.token),
-    gasCall('getRekapBulan', STATE.tahunAktif, bulan, STATE.token),
-    gasCall('getTambahanBulan', STATE.tahunAktif, bulan, STATE.token),
-    CACHE.kategoriTambahan ? Promise.resolve({success:true, data:CACHE.kategoriTambahan}) : gasCall('getKategoriTambahanList', STATE.token),
-    gasCall('getMemorialTambahan', STATE.tahunAktif, bulan, STATE.token)
-  ]).then(function(hasil){
+  // Semua panggilan jalan BERSAMAAN dalam SATU request batch (bukan tunggu
+  // status kunci dulu baru mulai tarik data, dan bukan N request terpisah)
+  // — ini yang bikin ganti bulan jauh lebih cepat. Kalau ternyata terkunci,
+  // hasil data mentahnya tinggal dibuang, tidak masalah (lebih murah
+  // daripada menunggu 2x giliran bolak-balik ke server).
+  var pakaiCacheKategori = !!CACHE.kategoriTambahan;
+  var callsMemorial = [
+    { fn:'getStatusJurnalMemorial', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getRekapBulan', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getTambahanBulan', args:[STATE.tahunAktif, bulan, STATE.token] },
+    { fn:'getMemorialTambahan', args:[STATE.tahunAktif, bulan, STATE.token] }
+  ];
+  if (!pakaiCacheKategori) callsMemorial.push({ fn:'getKategoriTambahanList', args:[STATE.token] });
+  gasCallBatch(callsMemorial).then(function(hasilBatch){
+    // Urutan dikembalikan SAMA PERSIS seperti Promise.all([...]) sebelumnya
+    // (statusRes, rekap, tb, katRes, mtRes) supaya kode di bawah tidak berubah.
+    var hasil = [
+      hasilBatch[0], hasilBatch[1], hasilBatch[2],
+      pakaiCacheKategori ? {success:true, data:CACHE.kategoriTambahan} : hasilBatch[4],
+      hasilBatch[3]
+    ];
     hideBar();
     var statusRes = hasil[0], rekap = hasil[1], tb = hasil[2], katRes = hasil[3], mtRes = hasil[4];
     if(!statusRes.success){ toast('error', statusRes.message); return; }
@@ -3452,7 +3501,10 @@ function loadLogView(){
 // ============================================================
 (function pulihkanSesi(){
   var tersimpan = ssGet('token');
-  if(!tersimpan){ return; } // tidak ada sesi tersimpan -> tampilkan Login seperti biasa
+  if(!tersimpan){
+    gasCall('loginUserBySession', '').catch(function(){}); // warm-up diam-diam, lihat catatan di atas
+    return;
+  }
   showLoading('Memulihkan sesi...');
   gasCall('loginUserBySession', tersimpan).then(function(res){
     hideLoading();
