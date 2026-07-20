@@ -3277,7 +3277,7 @@ function _prosesDataMentahMemorial(rekap, tb, kategoriList){
     var rows = [];
     (rekap.data||[]).forEach(function(r){
       if(sertakanPos[r.kodePos] === false || namaSelaluDikecualikan(r.namaPos)) return;
-      rows.push({ id:'tx_'+r.id, kode:r.kodePos, nama:r.namaPos, tanggal:r.tanggal, keterangan:r.keterangan||r.namaPos, debet:r.debet, kredit:r.kredit, sumber:'pos' });
+      rows.push({ id:'tx_'+r.id, kode:r.kodePos, kodeUnit:r.kodeUnit, nama:r.namaPos, tanggal:r.tanggal, keterangan:r.keterangan||r.namaPos, debet:r.debet, kredit:r.kredit, sumber:'pos' });
     });
     if(tb && tb.success){
       tb.data.forEach(function(t){
@@ -3286,6 +3286,34 @@ function _prosesDataMentahMemorial(rekap, tb, kategoriList){
         rows.push({ id:'tb_'+t.id, kode:t.kodeKategori, nama:namaKat, tanggal:t.tanggal, keterangan:t.keterangan||namaKat, debet:t.debet, kredit:t.kredit, sumber:'kategori' });
       });
     }
+    // PERBAIKAN: sebelumnya baris di sini dibiarkan apa adanya sesuai urutan
+    // transaksi masuk dari server (acak/kronologis, bukan per Unit/Pos) --
+    // dipakai bersama oleh checklist pemisahan, Preview Bukti Memorial, DAN
+    // hasil cetak, jadi ketiganya kelihatan acak & membingungkan. Diurutkan
+    // di sini, satu tempat, supaya konsisten rapi di semua tempat itu:
+    // Pos (dikelompokkan per Unit sesuai urutan Unit di Kelola Unit & Pos,
+    // lalu urutan Pos di dalam Unit itu) dulu, baru Item Non-Unit sesudahnya
+    // sesuai urutan Kategori yang sudah diatur Admin.
+    var idxUnit = {}; (STATE.myUnits||[]).forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
+    var idxPos = {}; posList.forEach(function(p,i){ idxPos[p.kodePos]=i; });
+    var idxKat = {}; kategoriList.forEach(function(k,i){ idxKat[k.kodeKategori]=i; });
+    rows.sort(function(a,b){
+      var grupA = a.sumber==='pos' ? 0 : 1, grupB = b.sumber==='pos' ? 0 : 1;
+      if(grupA !== grupB) return grupA - grupB;
+      if(a.sumber==='pos'){
+        var ua = idxUnit.hasOwnProperty(a.kodeUnit) ? idxUnit[a.kodeUnit] : 9999;
+        var ub = idxUnit.hasOwnProperty(b.kodeUnit) ? idxUnit[b.kodeUnit] : 9999;
+        if(ua !== ub) return ua - ub;
+        var pa = idxPos.hasOwnProperty(a.kode) ? idxPos[a.kode] : 9999;
+        var pb = idxPos.hasOwnProperty(b.kode) ? idxPos[b.kode] : 9999;
+        if(pa !== pb) return pa - pb;
+      } else {
+        var ka = idxKat.hasOwnProperty(a.kode) ? idxKat[a.kode] : 9999;
+        var kb = idxKat.hasOwnProperty(b.kode) ? idxKat[b.kode] : 9999;
+        if(ka !== kb) return ka - kb;
+      }
+      return String(a.tanggal||'').localeCompare(String(b.tanggal||''));
+    });
     MEMORIAL_STATE.rawRows = rows;
 
     var ambang = angkaKeAngka(document.getElementById('mem-ambang').value) || 0;
