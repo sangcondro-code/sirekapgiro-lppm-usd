@@ -3254,15 +3254,21 @@ function loadJurnalMemorial(){
     document.getElementById('memorial-checklist-card').classList.remove('d-none');
     renderMemorialLockBanner();
     if(katRes && katRes.success) CACHE.kategoriTambahan = katRes.data;
-    _prosesDataMentahMemorial(rekap, tb, CACHE.kategoriTambahan || []);
+    // PERBAIKAN: pakai daftar Unit & Pos TERBARU dari respons getRekapBulan
+    // (rekap.units / rekap.unitPos) barusan, bukan STATE.myUnits/STATE.myPos
+    // yang mungkin sudah usang di memori browser kalau urutannya baru saja
+    // diubah admin di Kelola Unit & Pos -- supaya urutan tampil di Jurnal
+    // Memorial dijamin selalu sesuai urutan TERBARU tanpa perlu logout/login.
+    _prosesDataMentahMemorial(rekap, tb, CACHE.kategoriTambahan || [], rekap.units, rekap.unitPos);
   }).catch(function(err){ hideBar(); toast('error','Gagal memuat: ' + (err && err.message ? err.message : 'coba lagi')); });
 }
-function _prosesDataMentahMemorial(rekap, tb, kategoriList){
+function _prosesDataMentahMemorial(rekap, tb, kategoriList, daftarUnitTerbaru, daftarPosTerbaru){
   if(!rekap.success){ toast('error', rekap.message); return; }
-  // Pos & Kode Rekening Kas/Bank sudah dimuat sekali saat login (STATE.myPos
-  // / STATE.kodeRekeningKasBank) — dipakai ulang langsung di sini, tidak
-  // perlu tarik ulang dari server tiap ganti bulan.
-  var posList = STATE.myPos || [];
+  // Pos & Kode Rekening Kas/Bank: pakai daftar TERBARU dari server (dikirim
+  // pemanggil, hasil load barusan) kalau ada -- fallback ke STATE.myPos yang
+  // dimuat sekali saat login, dipakai ulang untuk pemanggil lama yang belum
+  // mengirim parameter ini.
+  var posList = daftarPosTerbaru || STATE.myPos || [];
     var sertakanPos = {}; posList.forEach(function(p){ sertakanPos[p.kodePos] = p.sertakanMemorial !== false; });
     var sertakanKategori = {}; kategoriList.forEach(function(k){ sertakanKategori[k.kodeKategori] = k.sertakanMemorial !== false; });
     MEMORIAL_STATE.rekeningByPos = {}; posList.forEach(function(p){ MEMORIAL_STATE.rekeningByPos[p.kodePos] = p.kodeRekening || ''; });
@@ -3294,7 +3300,7 @@ function _prosesDataMentahMemorial(rekap, tb, kategoriList){
     // Pos (dikelompokkan per Unit sesuai urutan Unit di Kelola Unit & Pos,
     // lalu urutan Pos di dalam Unit itu) dulu, baru Item Non-Unit sesudahnya
     // sesuai urutan Kategori yang sudah diatur Admin.
-    var idxUnit = {}; (STATE.myUnits||[]).forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
+    var idxUnit = {}; (daftarUnitTerbaru || STATE.myUnits || []).forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
     var idxPos = {}; posList.forEach(function(p,i){ idxPos[p.kodePos]=i; });
     var idxKat = {}; kategoriList.forEach(function(k,i){ idxKat[k.kodeKategori]=i; });
     rows.sort(function(a,b){
