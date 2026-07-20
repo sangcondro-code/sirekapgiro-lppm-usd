@@ -985,6 +985,13 @@ function loadDashboard(){
     ].join('');
     var ctx = document.getElementById('chart-tahun').getContext('2d');
     if(chartTahun) chartTahun.destroy();
+    // PERBAIKAN KONSISTENSI FONT: seluruh UI aplikasi pakai 'Segoe UI', tapi
+    // Chart.js dirender ke <canvas> dan TIDAK ikut CSS halaman -- kalau
+    // tidak diatur eksplisit, dia pakai font bawaannya sendiri (beda dari
+    // teks lain di sekitarnya). Disamakan di sini, tepat sebelum grafik
+    // dibuat (Chart.js dimuat via <script defer>, jadi baru pasti sudah
+    // ada begitu fungsi ini benar-benar dipanggil user, bukan lebih awal).
+    Chart.defaults.font.family = "'Segoe UI', sans-serif";
     chartTahun = new Chart(ctx, { type:'bar', data:{
       labels: res.data.map(function(b){return b.namaBulan.slice(0,3);}),
       datasets:[
@@ -2706,6 +2713,7 @@ function cetakKonsolidasi(){
   var fmt2 = function(n){ return (Number(n)||0).toLocaleString('id-ID',{minimumFractionDigits:2,maximumFractionDigits:2}); };
 
   var css = [
+    '*{color:#000 !important;}', // jaminan tegas: semua teks hitam, apa pun sumbernya -- TOTAL/SALDO tetap dibedakan lewat bold (font-weight), bukan warna
     'body{font-family:Arial,sans-serif;font-size:9pt;color:#000;margin:0;padding:0;}',
     'table.t{width:100%;border-collapse:collapse;margin-bottom:10px;border-top:2px solid #000;}',
     'table.t thead th{border-bottom:1px solid #000;padding:4px 6px;font-weight:bold;background:#fff;font-size:8.5pt;text-align:left;}',
@@ -2721,7 +2729,7 @@ function cetakKonsolidasi(){
     '.pg{page-break-inside:avoid;}',
     '.pg.pb{page-break-before:always;}',
     '@page{ size:A4 portrait; margin:14mm 12mm 16mm; }',
-    '@page{ @bottom-center{ content:"Halaman " counter(page) " dari " counter(pages); font-size:7pt; color:#666; } }',
+    '@page{ @bottom-center{ content:"Halaman " counter(page) " dari " counter(pages); font-size:7pt; color:#000; } }',
     '@media print{ body{padding:0;} .unit-h{-webkit-print-color-adjust:exact;print-color-adjust:exact;} .pg.pb{page-break-before:always;} }'
   ].join('');
 
@@ -2734,7 +2742,7 @@ function cetakKonsolidasi(){
     +'<div style="font-weight:bold;font-size:10.5pt;">UNIVERSITAS SANATA DHARMA</div>'
     +'<div style="font-size:8.5pt;">Mrican Tromol Pos 29, Yogyakarta</div>'
     +'</div>'
-    +'<div style="text-align:right;font-size:8pt;color:#555;">Tahun: <b>'+STATE.tahunAktif+'</b></div>'
+    +'<div style="text-align:right;font-size:8pt;color:#000;">Tahun: <b>'+STATE.tahunAktif+'</b></div>'
     +'</div>';
 
   var footer = '<div style="font-size:6.5pt;color:#000;margin-top:8px;padding-top:3px;border-top:.5px solid #ccc;">'
@@ -2788,7 +2796,7 @@ function cetakKonsolidasi(){
     });
     halaman2 += '</div>';
   });
-  if(!adaDetail && !halaman1) halaman2 = '<p style="font-size:8.5pt;color:#555;">Tidak ada data untuk dicetak bulan ini.</p>';
+  if(!adaDetail && !halaman1) halaman2 = '<p style="font-size:8.5pt;color:#000;">Tidak ada data untuk dicetak bulan ini.</p>';
 
   // ── LAMPIRAN — rincian PENUH tiap kategori non-unit (Penarikan Cek, Admin,
   // Jasa Giro, Pajak, dst), baik ATAS maupun BAWAH, satu-satu per input.
@@ -2813,7 +2821,7 @@ function cetakKonsolidasi(){
     if(adaLampiran){
       halaman3 = '<div class="pg pb">'
         + '<div class="doc-title">LAMPIRAN — RINCIAN ITEM NON-UNIT</div>'
-        + '<p style="font-size:7.5pt;color:#800000;text-align:center;margin:-6px 0 10px;">(Referensi/backup — angka sudah termasuk di REKAP REKENING KORAN halaman 1, TIDAK diperhitungkan ulang di sini)</p>'
+        + '<p style="font-size:7.5pt;color:#000;font-weight:bold;text-align:center;margin:-6px 0 10px;">(Referensi/backup — angka sudah termasuk di REKAP REKENING KORAN halaman 1, TIDAK diperhitungkan ulang di sini)</p>'
         + isiLampiran + '</div>';
     }
   }
@@ -3555,6 +3563,7 @@ function cetakJurnalMemorial(){
   var css = [
     '@page{size:A4 portrait;margin:0;}',
     'html,body{margin:0;padding:0;}',
+    '*{color:#000 !important;}', // jaminan tegas: semua teks hitam, apa pun sumbernya
     'body{font-family:Arial,sans-serif;font-size:9pt;color:#000;}',
     '.mem-sheet{width:210mm;height:297mm;box-sizing:border-box;page-break-after:always;}',
     '.mem-sheet:last-child{page-break-after:auto;}',
