@@ -1753,7 +1753,13 @@ function gcPosFilter(id, q){
   }).join('') : '<div class="tx-pos-empty">Tidak ada pos yang cocok</div>';
   dd.classList.remove('d-none');
 }
-function gcPosHi(id){ var dd=_gcPosDd(); if(!dd) return; Array.prototype.forEach.call(dd.children, function(c,i){ c.classList.toggle('tx-pos-opt-hi', i===_gcHiIdx); }); }
+// PERBAIKAN BUG: dropdown ini sebelumnya cuma menandai baris yang disorot
+// (toggle class) tapi TIDAK menggulirkan area dropdown-nya, jadi begitu
+// baris yang disorot keluar dari area yang kelihatan (misal setelah
+// beberapa kali tekan panah bawah), tampilannya diam saja seolah macet.
+// Disamakan dengan dropdown pencarian Unit/Pos lain yang sudah benar
+// (lihat _scrollTxOptIntoView).
+function gcPosHi(id){ var dd=_gcPosDd(); if(!dd) return; Array.prototype.forEach.call(dd.children, function(c,i){ c.classList.toggle('tx-pos-opt-hi', i===_gcHiIdx); }); var opt=dd.children[_gcHiIdx]; if(opt && opt.scrollIntoView) opt.scrollIntoView({ block:'nearest' }); }
 function gcPosKey(e, id){
   if(e.key==='ArrowDown'){ e.preventDefault(); if(_gcFiltered.length){ _gcHiIdx=(_gcHiIdx+1)%_gcFiltered.length; gcPosHi(id); } return; }
   if(e.key==='ArrowUp'){ e.preventDefault(); if(_gcFiltered.length){ _gcHiIdx=(_gcHiIdx-1+_gcFiltered.length)%_gcFiltered.length; gcPosHi(id); } return; }
