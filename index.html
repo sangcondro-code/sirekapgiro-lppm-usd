@@ -3403,6 +3403,16 @@ function renderMemorialChecklist(){
 // Kalau sudah TERKUNCI, langsung kembalikan data beku apa adanya (tidak
 // dihitung ulang dari transaksi terbaru) — ini yang membuat data final tetap
 // konsisten walau ada transaksi lama yang diedit/dihapus setelahnya.
+//
+// PERBAIKAN: sebelumnya SEMUA baris "pisah" (lewat ambang otomatis atau
+// centang manual) ditaruh SEKALIGUS DI DEPAN, baru SEMUA baris gabungan
+// menyusul DI BELAKANG -- akibatnya baris-baris milik Pos yang SAMA bisa
+// kepencar ke dua tempat berbeda dalam daftar/cetak (satu di bagian pisah,
+// satu lagi jauh di bagian gabungan), membingungkan karena tidak lagi
+// terlihat sebagai "bagian dari Pos itu". Sekarang diproses SATU ALUR
+// mengikuti urutan Unit->Pos yang sudah benar (lihat MEMORIAL_STATE.rawRows)
+// -- baris pisah tetap muncul PERSIS di posisi Pos-nya, entri gabungan
+// untuk Pos yang sama juga langsung berdekatan di situ juga.
 function _bangunDaftarMemo(){
   if(MEMORIAL_STATE.locked) return MEMORIAL_STATE.frozenMemo || [];
   var bulan = document.getElementById('sel-bulan-memorial').value;
@@ -3410,30 +3420,37 @@ function _bangunDaftarMemo(){
   var rekBank = MEMORIAL_STATE.rekeningKasBank;
   var rekeningDari = function(r){ return r.sumber==='pos' ? MEMORIAL_STATE.rekeningByPos[r.kode] : MEMORIAL_STATE.rekeningByKategori[r.kode]; };
   var memo = [];
+  var agg = {}; // kode+arah -> objek agregat; objek yang SAMA dipush ke `memo` sekali di posisi kemunculan PERTAMA, lalu jumlahnya ditambah terus di situ juga -- posisinya di `memo` tidak pernah pindah.
 
   MEMORIAL_STATE.rawRows.forEach(function(r){
-    if(!MEMORIAL_STATE.pisahIds[r.id]) return;
     var rekPos = rekeningDari(r);
-    if(r.kredit > 0) memo.push({ id:r.id+'_k', tanggal:r.tanggal, keterangan:r.keterangan, jumlah:r.kredit, debetRek:rekBank, kreditRek:rekPos });
-    if(r.debet > 0) memo.push({ id:r.id+'_d', tanggal:r.tanggal, keterangan:r.keterangan, jumlah:r.debet, debetRek:rekPos, kreditRek:rekBank });
+    if(MEMORIAL_STATE.pisahIds[r.id]){
+      if(r.kredit > 0) memo.push({ id:r.id+'_k', tanggal:r.tanggal, keterangan:r.keterangan, jumlah:r.kredit, debetRek:rekBank, kreditRek:rekPos });
+      if(r.debet > 0) memo.push({ id:r.id+'_d', tanggal:r.tanggal, keterangan:r.keterangan, jumlah:r.debet, debetRek:rekPos, kreditRek:rekBank });
+      return;
+    }
+    if(r.kredit > 0){
+      var kk = r.kode+'|K';
+      if(!agg[kk]){ agg[kk] = { id:'agg_'+kk, tanggal:akhirBln, nama:r.nama, rekPos:rekPos, jumlah:0, arah:'K' }; memo.push(agg[kk]); }
+      agg[kk].jumlah += r.kredit;
+    }
+    if(r.debet > 0){
+      var kd = r.kode+'|D';
+      if(!agg[kd]){ agg[kd] = { id:'agg_'+kd, tanggal:akhirBln, nama:r.nama, rekPos:rekPos, jumlah:0, arah:'D' }; memo.push(agg[kd]); }
+      agg[kd].jumlah += r.debet;
+    }
   });
 
-  var agg = {};
-  MEMORIAL_STATE.rawRows.forEach(function(r){
-    if(MEMORIAL_STATE.pisahIds[r.id]) return;
-    var rekPos = rekeningDari(r);
-    if(r.kredit > 0){ var kk = r.kode+'|K'; agg[kk] = agg[kk] || { nama:r.nama, rekPos:rekPos, jumlah:0, arah:'K' }; agg[kk].jumlah += r.kredit; }
-    if(r.debet > 0){ var kd = r.kode+'|D'; agg[kd] = agg[kd] || { nama:r.nama, rekPos:rekPos, jumlah:0, arah:'D' }; agg[kd].jumlah += r.debet; }
+  // Finalisasi entri agregat (isi keterangan/rekening final) + buang yang
+  // jumlahnya jadi 0 sepanjang bulan (debet & kredit saling meniadakan).
+  return memo.filter(function(m){
+    if(m.arah === undefined) return true; // baris "pisah", bukan agregat -- selalu tampil apa adanya
+    if(m.jumlah <= 0) return false;
+    m.keterangan = (m.arah==='K' ? _labelSetoran(m.nama) : m.nama);
+    m.debetRek = m.arah==='K' ? rekBank : m.rekPos;
+    m.kreditRek = m.arah==='K' ? m.rekPos : rekBank;
+    return true;
   });
-  Object.keys(agg).forEach(function(k){
-    var a = agg[k];
-    if(a.jumlah <= 0) return;
-    memo.push({
-      id:'agg_'+k, tanggal:akhirBln, keterangan:(a.arah==='K' ? _labelSetoran(a.nama) : a.nama), jumlah:a.jumlah,
-      debetRek: a.arah==='K' ? rekBank : a.rekPos, kreditRek: a.arah==='K' ? a.rekPos : rekBank
-    });
-  });
-  return memo;
 }
 
 function renderMemorialList(){
