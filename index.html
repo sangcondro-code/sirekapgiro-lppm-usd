@@ -504,12 +504,19 @@
 
       <div id="memorial-lock-banner"></div>
 
-      <div class="card mb-3" id="memorial-checklist-card"><div class="card-body">
+      <div class="d-flex gap-2 mb-3 no-print" id="memorial-mode-toggle">
+        <div class="pos-tab active" data-mode="checklist" onclick="switchMemorialMode('checklist')"><i class="fas fa-list-check"></i>Pilih Transaksi yang Dipisah Jadi Memo Sendiri</div>
+        <div class="pos-tab" data-mode="preview" onclick="switchMemorialMode('preview')"><i class="fas fa-file-invoice"></i>Preview Bukti Memorial</div>
+      </div>
+
+      <div class="card mb-3" id="memorial-checklist-card">
+        <div class="card-body">
         <div class="section-title mb-2"><i class="fas fa-list-check"></i>Pilih Transaksi yang Dipisah Jadi Memo Sendiri</div>
         <div id="memorial-checklist"></div>
       </div></div>
 
-      <div class="card mb-3"><div class="card-body">
+      <div class="card mb-3 d-none" id="memorial-preview-card">
+        <div class="card-body">
         <div class="section-title mb-2"><i class="fas fa-file-invoice"></i>Preview Bukti Memorial</div>
         <div id="memorial-list"></div>
       </div></div>
@@ -3204,7 +3211,16 @@ var MEMORIAL_STATE = { rawRows:[], pisahIds:{}, nomorMap:{}, rekeningByPos:{}, r
 var MEMORIAL_TAMBAHAN_STATE = { list:[], locked:false };
 
 function initMemorialView(){
+  switchMemorialMode('checklist'); // selalu mulai dari tab "Pilih Transaksi" tiap buka halaman ini
   initBulanSelect('sel-bulan-memorial', function(){ loadJurnalMemorial(); });
+}
+// Toggle "Pilih Transaksi yang Dipisah" <-> "Preview Bukti Memorial" — dibuat
+// jadi tab (bukan ditumpuk ke bawah) supaya lebih cepat dicari, sama persis
+// pola tab "Input Unit / Input Non Unit" di halaman Input Rekap Bulanan.
+function switchMemorialMode(mode){
+  document.querySelectorAll('#memorial-mode-toggle .pos-tab').forEach(function(el){ el.classList.toggle('active', el.dataset.mode===mode); });
+  document.getElementById('memorial-checklist-card').classList.toggle('d-none', mode!=='checklist');
+  document.getElementById('memorial-preview-card').classList.toggle('d-none', mode!=='preview');
 }
 
 // Cek status kunci DULU (1 panggilan ringan) — kalau sudah terkunci, tidak
@@ -3246,12 +3262,10 @@ function loadJurnalMemorial(){
     if(statusRes.locked){
       MEMORIAL_STATE.frozenMemo = statusRes.memoData || [];
       renderMemorialLockBanner();
-      document.getElementById('memorial-checklist-card').classList.remove('d-none');
       document.getElementById('memorial-checklist').innerHTML = '<p class="text-muted small mb-0"><i class="fas fa-lock me-1"></i>Sudah dikunci — daftar pilihan disembunyikan karena tidak bisa diubah lagi. Buka kunci dulu kalau perlu menyunting.</p>';
       renderMemorialList();
       return;
     }
-    document.getElementById('memorial-checklist-card').classList.remove('d-none');
     renderMemorialLockBanner();
     if(katRes && katRes.success) CACHE.kategoriTambahan = katRes.data;
     // PERBAIKAN: pakai daftar Unit & Pos TERBARU dari respons getRekapBulan
