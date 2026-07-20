@@ -2452,7 +2452,23 @@ function renderKategoriBagian(key){
 // khusus untuk Pos yang namanya sudah begitu. Fungsi ini menghindari itu:
 // kalau nama sudah diawali 'Setoran' (tanpa peduli besar/kecil huruf),
 // tidak ditambah lagi.
-function _labelSetoran(nama){ nama = nama || ''; return /^setoran/i.test(nama.trim()) ? nama : 'Setoran '+nama; }
+// PERBAIKAN BUG: versi awal fungsi ini cuma MENCEGAH dobel baru ('Setoran '
+// tidak ditambah lagi kalau nama SUDAH diawali 'Setoran') -- tapi kalau
+// cuplikan nama Pos yang tersimpan di baris transaksi LAMA ternyata SUDAH
+// dobel dari awal (mis. karena nama Pos sempat salah ketik dobel sebelum
+// diperbaiki di Kelola Unit & Pos -- transaksi lama tetap membawa cuplikan
+// nama SAAT itu, tidak ikut ter-update walau nama Pos-nya sudah dibetulkan
+// belakangan), fungsi lama tidak bisa membersihkannya. Sekarang: lucuti
+// SEMUA kata 'Setoran' yang berulang di depan (berapa pun banyaknya),
+// baru tambahkan satu -- jadi otomatis bersih untuk data lama maupun baru.
+function _labelSetoran(nama){
+  nama = (nama||'').trim();
+  var kata = nama.split(/\s+/);
+  while(kata.length > 1 && /^setoran$/i.test(kata[0])) kata.shift();
+  var bersih = kata.join(' ');
+  if(/^setoran$/i.test(bersih)) return bersih;
+  return 'Setoran ' + bersih;
+}
 function _bangunBarisRekapPerPos(c){
   var rows = [];
   c.kategoriAtas.forEach(function(kat){
