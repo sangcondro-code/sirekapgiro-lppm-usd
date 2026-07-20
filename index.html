@@ -539,6 +539,7 @@
 // permintaan dikirim ke server — kalau gagal baru di-rollback + toast error.
 // ============================================================
 var STATE = { token:null, role:null, nama:null, username:null, tahunAktif:null, daftarTahun:[], myPos:[], myUnits:[], namaBank:'CIMB Niaga', kodeRekeningKasBank:'' };
+var _konsolidasiCache = null; // PERBAIKAN BUG: sebelumnya tidak dideklarasikan var di awal -> ReferenceError 'not defined' kalau dipakai (mis. saat simpan Item Non-Unit) SEBELUM pernah membuka halaman Rekap Konsolidasi sekali pun di sesi itu, dan error itu menggagalkan seluruh proses simpan.
 // ── Sesi login disimpan di sessionStorage (BUKAN localStorage) supaya:
 // (a) reload/refresh halaman TIDAK langsung melempar ke Login lagi — sesi
 //     dipulihkan otomatis kalau tokennya masih valid di server, dan
