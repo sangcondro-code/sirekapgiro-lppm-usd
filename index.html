@@ -1842,33 +1842,43 @@ function gcSimpanSemua(){
 
   var btn = document.getElementById('gc-btn-simpan');
   btnBusy(btn, true);
-  var totalMasuk = 0, adaBV = false;
-  var jalan = function(idx){
-    if(idx >= tugas.length){
-      btnBusy(btn, false);
-      toast('success', totalMasuk + ' transaksi tersimpan');
+  // PERBAIKAN PERFORMA: sebelumnya batch per-Pos dikirim BERGILIRAN, tiap
+  // batch = 1 request HTTP terpisah ke Apps Script (mahal di hosting luar
+  // seperti GitHub Pages, karena tiap fetch() bayar round-trip PENUH +
+  // redirect internal Google). Sekarang SEMUA batch digabung jadi SATU
+  // request lewat gasCallBatch (mode "calls" di doPost/Code.gs) — hasilnya
+  // dikembalikan dalam urutan yang sama, jadi cukup 1x tunggu jaringan
+  // walau isian tersebar ke banyak Pos sekaligus.
+  var adaBV = false;
+  var calls = tugas.map(function(t){
+    var isBV = (t.kodePos===POS_BELUM_JELAS); if(isBV) adaBV=true;
+    var idKey = _idemKey('gc'+bulan+'_'+STATE.tahunAktif+'_'+t.kodePos, t.baris);
+    return isBV
+      ? { fn:'tambahBanyakTransaksiBelumVerifikasi', args:[STATE.tahunAktif, bulan, t.baris, STATE.token, idKey] }
+      : { fn:'importTransaksiBulk', args:[STATE.tahunAktif, bulan, t.kodePos, t.baris, STATE.token, idKey] };
+  });
+  gasCallBatch(calls).then(function(hasilBatch){
+    btnBusy(btn, false);
+    var totalMasuk = 0, pesanError = [];
+    hasilBatch.forEach(function(rr, i){
+      if(!rr || !rr.success){ pesanError.push((rr && rr.message) || 'Gagal untuk pos '+tugas[i].kodePos); return; }
+      totalMasuk += (rr.jumlah || tugas[i].baris.length);
+    });
+    if(totalMasuk > 0){
       initGridCepat();
       delete CACHE.rekap[_rekapCacheKey()];
       loadRekapBulan();
       if(adaBV) loadPerluVerifikasi();
-      return;
     }
-    var t = tugas[idx];
-    var isBV = (t.kodePos===POS_BELUM_JELAS); if(isBV) adaBV=true;
-    var idKey = _idemKey('gc'+bulan+'_'+STATE.tahunAktif+'_'+t.kodePos, t.baris);
-    var call = isBV
-      ? gasCall('tambahBanyakTransaksiBelumVerifikasi', STATE.tahunAktif, bulan, t.baris, STATE.token, idKey)
-      : gasCall('importTransaksiBulk', STATE.tahunAktif, bulan, t.kodePos, t.baris, STATE.token, idKey);
-    call.then(function(rr){
-      if(!rr.success){ btnBusy(btn, false); toast('error', rr.message); return; }
-      totalMasuk += (rr.jumlah || t.baris.length);
-      jalan(idx+1);
-    }).catch(function(err){
-      btnBusy(btn, false);
-      toast('error','Gagal menyimpan: ' + ((err && err.message) ? err.message : 'periksa koneksi & coba lagi'));
-    });
-  };
-  jalan(0);
+    if(pesanError.length){
+      toast('error', (totalMasuk>0 ? totalMasuk+' transaksi tersimpan, tapi ' : '') + pesanError.length+' batch gagal: '+pesanError[0]);
+    } else {
+      toast('success', totalMasuk + ' transaksi tersimpan');
+    }
+  }).catch(function(err){
+    btnBusy(btn, false);
+    toast('error','Gagal menyimpan: ' + ((err && err.message) ? err.message : 'periksa koneksi & coba lagi'));
+  });
 }
 
 // ── Pemilih Pos untuk kartu "Daftar Transaksi" (review/edit data tersimpan) ──
