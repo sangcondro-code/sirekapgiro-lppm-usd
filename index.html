@@ -100,6 +100,11 @@
   .tx-pos-unit { color:#9ca3af; font-size:.74rem; flex-shrink:0; }
   .tx-pos-nama { color:#111; font-weight:600; white-space:nowrap; }
   .tx-pos-empty { padding:10px; font-size:.8rem; color:#9ca3af; text-align:center; }
+  /* Saran Keterangan (Input Cepat) bisa jauh lebih panjang dari nama Pos --
+     dibuat boleh turun baris (beda dari .tx-pos-nama yang sengaja nowrap
+     karena nama Pos biasanya pendek), plus info "berapa kali dipakai". */
+  #gc-ket-dd-shared .tx-pos-opt { align-items:flex-start; flex-wrap:wrap; }
+  #gc-ket-dd-shared .tx-pos-nama { white-space:normal; font-weight:500; flex:1 1 200px; min-width:0; }
   .tx-pos-input { padding-right:26px !important; cursor:pointer; background:#fff; caret-color:transparent; }
   .tx-pos-chevron { position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#9ca3af; font-size:.68rem; pointer-events:none; }
   @media print { .sidebar, .navbar-top, .no-print { display:none !important; } .main { margin-left:0; padding:0; } }
@@ -1616,6 +1621,7 @@ function _gcNewRow(carry){
 
 function initGridCepat(){
   _gcRows = []; _gcSeq = 1;
+  _gcRiwayatKetCache = {}; // reset supaya saran selalu segar, terutama setelah baru saja menyimpan data baru
   for(var i=0;i<5;i++) _gcRows.push(_gcNewRow(false));
   gcRender();
 }
@@ -1640,8 +1646,8 @@ function gcRowHtml(r,i){
           + ' onfocus="gcPosFocus('+r.id+')" oninput="gcPosInput('+r.id+')" onkeydown="gcPosKey(event,'+r.id+')" onblur="gcPosBlur('+r.id+')">'
         + '<i class="fas fa-chevron-down tx-pos-chevron"></i>'
       + '</div></td>'
-    + '<td><input type="text" class="form-control form-control-sm" placeholder="Keterangan" value="'+_gcEsc(r.ket)+'"'
-        + ' oninput="gcUpd('+r.id+',\'ket\',this.value)" onkeydown="gcKey(event,'+r.id+',\'ket\')"></td>'
+    + '<td><input type="text" class="form-control form-control-sm" placeholder="Keterangan" value="'+_gcEsc(r.ket)+'" id="gc-ket-'+r.id+'" autocomplete="off"'
+        + ' oninput="gcUpd('+r.id+',\'ket\',this.value);gcKetInput('+r.id+')" onfocus="gcKetFocus('+r.id+')" onkeydown="gcKetKey(event,'+r.id+')" onblur="gcKetBlur('+r.id+')"></td>'
     + '<td><input type="text" inputmode="decimal" class="form-control form-control-sm text-end" value="'+dStr+'" placeholder="0,00"'
         + ' oninput="formatAngkaLive(this);gcUpd('+r.id+',\'debet\',angkaKeAngka(this.value))" onblur="finalisasiAngka(this);gcUpd('+r.id+',\'debet\',angkaKeAngka(this.value))"'
         + ' onfocus="this.select()" onkeydown="gcKey(event,'+r.id+',\'debet\')"></td>'
@@ -1789,6 +1795,107 @@ function gcPosBlur(id){
 }
 window.addEventListener('scroll', function(){ if(_gcPosActiveId!=null) _gcPosPlace(_gcPosActiveId); }, true);
 window.addEventListener('resize', function(){ if(_gcPosActiveId!=null) _gcPosPlace(_gcPosActiveId); });
+
+// ── Saran Keterangan per baris (riwayat pemakaian Keterangan utk Pos yang
+// sama, dari bulan-bulan lain di tahun aktif) — supaya tidak perlu ngetik
+// ulang keterangan yang polanya sering berulang. Pola & mekanismenya
+// SENGAJA dibuat identik dengan kombobox Pos di atas (dropdown mengambang
+// bersama, navigasi keyboard, dsb) supaya terasa konsisten dipakai.
+// PENTING: berbeda dari Pos (yang harus pilih dari daftar), Keterangan
+// tetap bebas diketik apa saja -- dropdown ini murni percepatan opsional,
+// tidak pernah "menyandera" teks yang sudah diketik user.
+var _gcKetActiveId = null;
+var _gcKetFiltered = [];
+var _gcKetHiIdx = -1;
+var _gcRiwayatKetCache = {}; // kodePos -> array hasil (sudah selesai dimuat) ATAU Promise (sedang dimuat)
+function _gcKetDd(){ return document.getElementById('gc-ket-dd-shared'); }
+function _gcKetPlace(id){
+  var inp=document.getElementById('gc-ket-'+id); var dd=_gcKetDd(); if(!inp||!dd) return;
+  var r=inp.getBoundingClientRect();
+  dd.style.right = 'auto';
+  dd.style.left = '0px'; dd.style.width = 'max-content'; dd.style.minWidth = r.width+'px';
+  dd.style.maxWidth = Math.max(320, window.innerWidth-24)+'px';
+  dd.style.top = (r.bottom+3)+'px';
+  var ddW = dd.offsetWidth;
+  var left = r.left;
+  if(left + ddW > window.innerWidth - 12) left = Math.max(12, window.innerWidth - 12 - ddW);
+  dd.style.left = left+'px';
+}
+// Muat riwayat Keterangan utk 1 kodePos dari server (sekali saja per kodePos
+// per sesi grid ini -- baris lain yang pakai Pos sama otomatis pakai hasil
+// yang sudah ada, tidak nanya server berulang-ulang).
+function _gcMuatRiwayatKet(kodePos){
+  var c = _gcRiwayatKetCache[kodePos];
+  if(Array.isArray(c)) return Promise.resolve(c);
+  if(c) return c; // promise sedang berjalan
+  var p = gasCall('getRiwayatKeterangan', STATE.tahunAktif, kodePos, STATE.token).then(function(res){
+    var list = (res && res.success) ? res.data : [];
+    _gcRiwayatKetCache[kodePos] = list;
+    return list;
+  }).catch(function(){ _gcRiwayatKetCache[kodePos] = []; return []; });
+  _gcRiwayatKetCache[kodePos] = p;
+  return p;
+}
+function gcKetFocus(id){
+  _gcKetActiveId = id;
+  var inp=document.getElementById('gc-ket-'+id); if(inp) inp.select();
+  var r=_gcFind(id); if(!r || !r.kodePos) return; // belum pilih Pos -> belum ada riwayat utk ditawarkan
+  _gcMuatRiwayatKet(r.kodePos).then(function(){
+    if(_gcKetActiveId!==id) return; // fokus sudah pindah baris lain, jangan tampilkan basi
+    var el=document.getElementById('gc-ket-'+id);
+    gcKetFilter(id, el?el.value:'');
+  });
+}
+function gcKetInput(id){ _gcKetPlace(id); var inp=document.getElementById('gc-ket-'+id); gcKetFilter(id, inp?inp.value:''); }
+function gcKetFilter(id, q){
+  var r=_gcFind(id); if(!r || !r.kodePos){ var dd0=_gcKetDd(); if(dd0) dd0.classList.add('d-none'); return; }
+  var cached = _gcRiwayatKetCache[r.kodePos];
+  var all = Array.isArray(cached) ? cached : [];
+  q=(q||'').trim().toLowerCase();
+  var list = q ? all.filter(function(o){ return o.keterangan.toLowerCase().indexOf(q)>-1; }) : all;
+  _gcKetFiltered = list; _gcKetHiIdx = list.length?0:-1;
+  var dd=_gcKetDd(); if(!dd) return;
+  if(!list.length){ dd.classList.add('d-none'); return; }
+  _gcKetPlace(id);
+  dd.innerHTML = list.map(function(o,i){
+    return '<div class="tx-pos-opt'+(i===_gcKetHiIdx?' tx-pos-opt-hi':'')+'" onmousedown="event.preventDefault();gcKetPick('+id+','+i+')" onmouseenter="_gcKetHiIdx='+i+';gcKetHi('+id+')">'
+      + '<span class="tx-pos-nama">'+_gcEsc(o.keterangan)+'</span>'
+      + '<span class="text-muted ms-2" style="font-size:.72rem;white-space:nowrap;">'+o.jumlah+'x &middot; terakhir '+_gcEsc(o.terakhirTanggal||'')+'</span>'
+      + '</div>';
+  }).join('');
+  dd.classList.remove('d-none');
+}
+function gcKetHi(id){ var dd=_gcKetDd(); if(!dd) return; Array.prototype.forEach.call(dd.children, function(c,i){ c.classList.toggle('tx-pos-opt-hi', i===_gcKetHiIdx); }); var opt=dd.children[_gcKetHiIdx]; if(opt && opt.scrollIntoView) opt.scrollIntoView({ block:'nearest' }); }
+function gcKetKey(e, id){
+  var dd=_gcKetDd(); var terbuka = dd && !dd.classList.contains('d-none') && _gcKetFiltered.length;
+  if(e.key==='ArrowDown' && terbuka){ e.preventDefault(); _gcKetHiIdx=(_gcKetHiIdx+1)%_gcKetFiltered.length; gcKetHi(id); return; }
+  if(e.key==='ArrowUp' && terbuka){ e.preventDefault(); _gcKetHiIdx=(_gcKetHiIdx-1+_gcKetFiltered.length)%_gcKetFiltered.length; gcKetHi(id); return; }
+  if(e.key==='Escape'){ if(dd) dd.classList.add('d-none'); return; }
+  if(e.key==='Enter' || (e.key==='Tab' && !e.shiftKey)){
+    if(terbuka && _gcKetHiIdx>-1){ e.preventDefault(); gcKetPick(id, _gcKetHiIdx); return; }
+    // tidak ada saran yang disorot -> teks ketikan user dipakai apa adanya,
+    // jalankan navigasi kolom seperti biasa (lompat ke Debet)
+    if(e.key==='Enter') gcKey(e, id, 'ket');
+    return;
+  }
+}
+function gcKetPick(id, i){
+  var o=_gcKetFiltered[i]; if(!o) return;
+  var r=_gcFind(id); if(!r) return;
+  r.ket = o.keterangan;
+  var inp=document.getElementById('gc-ket-'+id); if(inp) inp.value=o.keterangan;
+  var dd=_gcKetDd(); if(dd) dd.classList.add('d-none');
+  var d=document.querySelector('#gc-tr-'+id+' td:nth-child(5) input'); if(d){ d.focus(); d.select(); }
+}
+function gcKetBlur(id){
+  setTimeout(function(){
+    if(_gcKetActiveId!==id) return; // fokus sudah pindah ke baris lain -> jangan ganggu dropdown baris itu
+    _gcKetActiveId=null;
+    var dd=_gcKetDd(); if(dd) dd.classList.add('d-none');
+  }, 150);
+}
+window.addEventListener('scroll', function(){ if(_gcKetActiveId!=null) _gcKetPlace(_gcKetActiveId); }, true);
+window.addEventListener('resize', function(){ if(_gcKetActiveId!=null) _gcKetPlace(_gcKetActiveId); });
 
 // ── Tempel banyak baris dari rekening koran (Excel/Sheets) ──
 function gcBukaTempel(){
@@ -2338,6 +2445,14 @@ function renderKategoriBagian(key){
 // Baris REKAP PER POS (dipakai BERSAMA oleh tampilan layar & cetak, supaya
 // dijamin selalu sama persis): item ATAS dirinci apa adanya, 1 baris
 // "Setoran <Pos>" per Pos Unit, item BAWAH diakumulasi 1 baris per kategori.
+
+// PERBAIKAN BUG: sebagian Pos memang dinamai diawali kata 'Setoran' oleh
+// Admin (mis. 'Setoran Kursus IELTS...'), sementara rekap SELALU menambah
+// kata 'Setoran ' di depan nama Pos -> jadi dobel ('Setoran Setoran ...')
+// khusus untuk Pos yang namanya sudah begitu. Fungsi ini menghindari itu:
+// kalau nama sudah diawali 'Setoran' (tanpa peduli besar/kecil huruf),
+// tidak ditambah lagi.
+function _labelSetoran(nama){ nama = nama || ''; return /^setoran/i.test(nama.trim()) ? nama : 'Setoran '+nama; }
 function _bangunBarisRekapPerPos(c){
   var rows = [];
   c.kategoriAtas.forEach(function(kat){
@@ -2346,7 +2461,7 @@ function _bangunBarisRekapPerPos(c){
     });
   });
   c.ringkasanPos.forEach(function(r){
-    rows.push({ tanggal:'', ket:'Setoran '+r.namaPos, debet:r.debet, kredit:r.kredit });
+    rows.push({ tanggal:'', ket:_labelSetoran(r.namaPos), debet:r.debet, kredit:r.kredit });
   });
   var akhirBln = akhirBulanStr(STATE.tahunAktif, c.bulan);
   c.kategoriBawah.forEach(function(kat){
@@ -3255,7 +3370,7 @@ function _bangunDaftarMemo(){
     var a = agg[k];
     if(a.jumlah <= 0) return;
     memo.push({
-      id:'agg_'+k, tanggal:akhirBln, keterangan:(a.arah==='K' ? 'Setoran '+a.nama : a.nama), jumlah:a.jumlah,
+      id:'agg_'+k, tanggal:akhirBln, keterangan:(a.arah==='K' ? _labelSetoran(a.nama) : a.nama), jumlah:a.jumlah,
       debetRek: a.arah==='K' ? rekBank : a.rekPos, kreditRek: a.arah==='K' ? a.rekPos : rekBank
     });
   });
@@ -3533,5 +3648,6 @@ function loadLogView(){
 })();
 </script>
 <div class="tx-pos-dropdown d-none" id="gc-pos-dd-shared" style="position:fixed;"></div>
+<div class="tx-pos-dropdown d-none" id="gc-ket-dd-shared" style="position:fixed;"></div>
 </body>
 </html>
