@@ -320,6 +320,7 @@
           <select id="sel-bulan-konsolidasi" class="form-select form-select-sm" style="width:auto;" onchange="loadKonsolidasi()"></select>
           <button class="btn btn-sm btn-outline-secondary no-print" onclick="cetakKonsolidasi()"><i class="fas fa-print me-1"></i>Cetak</button>
           <button class="btn btn-sm btn-outline-secondary no-print" id="btn-download-csv" onclick="downloadCSVKonsolidasi()"><i class="fas fa-file-csv me-1"></i>Download CSV</button>
+          <button class="btn btn-sm btn-outline-secondary no-print" id="btn-download-excel" onclick="downloadExcelKonsolidasi()"><i class="fas fa-file-excel me-1"></i>Download Excel</button>
         </div>
       </div>
 
@@ -478,14 +479,20 @@
         </form>
       </div></div>
 
-      <div class="card"><div class="card-body">
+      <div class="card mb-3"><div class="card-body">
         <div class="section-title mb-2"><i class="fas fa-eye-slash"></i>Kategori Dikecualikan dari Jurnal Memorial</div>
         <p class="text-muted small mb-2">Kategori yang DICENTANG di bawah TIDAK akan pernah muncul di Jurnal Memorial (mis. Penarikan Cek — sudah tercatat di transaksi kas, jadi tidak perlu dobel).</p>
         <div id="daftar-kecualikan-memorial"></div>
       </div></div>
+
+      <div class="card"><div class="card-body">
+        <div class="section-title mb-2"><i class="fas fa-arrows-split-up-and-left"></i>Pos yang Selalu Dipisah Otomatis di Jurnal Memorial</div>
+        <p class="text-muted small mb-2">Pos yang DICENTANG di bawah: SEMUA transaksinya (berapa pun nominal, Debet maupun Kredit) otomatis dicentang jadi memo sendiri-sendiri di Jurnal Memorial, tidak digabung dan tidak menunggu Ambang Rp — cocok untuk Pos semacam "Bunga Deposito", atau kalau Anda mau satu Unit tertentu (mis. LPPM) selalu terpisah, tinggal centang semua Pos di unit itu. Di luar ini, transaksi Kredit tetap ikut aturan Ambang Rp di halaman Jurnal Memorial, dan transaksi Debet selalu otomatis terpisah apa pun nominalnya.</p>
+        <div id="daftar-selalu-pisah-memorial"></div>
+      </div></div>
     </div>
 
-    <!-- JURNAL MEMORIAL (ADMIN) -->
+        <!-- JURNAL MEMORIAL (ADMIN) -->
     <div id="view-memorial" class="view d-none">
       <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
         <h5 class="page-title">Jurnal Memorial</h5>
@@ -2713,6 +2720,30 @@ function downloadCSVKonsolidasi(){
     toast('success','File CSV diunduh');
   }).catch(function(err){ btnBusy(btn, false); toast('error','Gagal membuat file CSV: ' + (err && err.message ? err.message : 'coba lagi')); });
 }
+// FITUR: sebelumnya fungsi backend exportKonsolidasiExcel() sudah lengkap
+// (bahkan sempat diperbaiki bug totalnya), tapi TIDAK ADA tombol di UI yang
+// memanggilnya sama sekali -- jadi fiturnya sebenarnya tidak pernah bisa
+// dipakai siapa pun. Ditambahkan di sini, pola sama persis dengan Download
+// CSV, cuma hasil dari server berupa base64 (isi file .xlsx yang sudah jadi)
+// bukan teks CSV mentah.
+function downloadExcelKonsolidasi(){
+  if(!_konsolidasiCache){ toast('error','Belum ada data untuk diunduh'); return; }
+  var bulan = document.getElementById('sel-bulan-konsolidasi').value;
+  var btn = document.getElementById('btn-download-excel');
+  btnBusy(btn, true);
+  gasCall('exportKonsolidasiExcel', STATE.tahunAktif, bulan, STATE.token).then(function(res){
+    btnBusy(btn, false);
+    if(!res.success){ toast('error', res.message); return; }
+    var byteChars = atob(res.base64);
+    var byteNumbers = new Array(byteChars.length);
+    for(var i=0;i<byteChars.length;i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    var blob = new Blob([new Uint8Array(byteNumbers)], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = res.filename; document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    toast('success','File Excel diunduh');
+  }).catch(function(err){ btnBusy(btn, false); toast('error','Gagal membuat file Excel: ' + (err && err.message ? err.message : 'coba lagi')); });
+}
 function cetakKonsolidasi(){
   if(!_konsolidasiCache){ toast('error','Belum ada data untuk dicetak'); return; }
   var c = _konsolidasiCache;
@@ -2735,6 +2766,7 @@ function cetakKonsolidasi(){
     '.pos-h{font-weight:bold;font-size:8.7pt;padding:2px 2px 4px;text-transform:uppercase;margin-top:16px;}',
     '.pos-h:first-of-type{margin-top:0;}',
     '.pg{page-break-inside:avoid;}',
+    '.pgpos{page-break-inside:avoid;}', // supaya judul "REKAP <Pos>" tidak pernah tercetak terpisah dari tabelnya sendiri
     '.pg.pb{page-break-before:always;}',
     '@page{ size:A4 portrait; margin:14mm 12mm 16mm; }',
     '@page{ @bottom-center{ content:"Halaman " counter(page) " dari " counter(pages); font-size:7pt; color:#000; } }',
@@ -2797,10 +2829,10 @@ function cetakKonsolidasi(){
       var grp = unit.pos[kp], d=0, k=0;
       var rowsHtml = grp.rows.map(function(r,i){ d+=r.debet; k+=r.kredit; adaDetail = true;
         return '<tr><td class="c">'+(i+1)+'</td><td>'+r.tanggal+'</td><td>'+_gcEsc(r.keterangan||'')+'</td><td class="r">'+fmt2(r.debet)+'</td><td class="r">'+fmt2(r.kredit)+'</td></tr>'; }).join('');
-      halaman2 += '<div class="pos-h">REKAP '+grp.nama+'</div>'
+      halaman2 += '<div class="pgpos"><div class="pos-h">REKAP '+grp.nama+'</div>'
         +'<table class="t"><thead><tr><th class="c" style="width:6%;">No</th><th style="width:14%;">Tanggal</th><th>Keterangan</th><th class="r" style="width:18%;">Debet</th><th class="r" style="width:18%;">Kredit</th></tr></thead>'
         +'<tbody>'+(rowsHtml || '<tr><td colspan="5" class="c">Tidak ada data</td></tr>')+'</tbody>'
-        +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table>';
+        +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table></div>';
     });
     halaman2 += '</div>';
   });
@@ -2821,15 +2853,14 @@ function cetakKonsolidasi(){
       var d=0,k=0;
       var body = rows.map(function(r,i){ d+=r.debet; k+=r.kredit;
         return '<tr><td class="c">'+(i+1)+'</td><td>'+r.tanggal+'</td><td>'+_gcEsc(r.keterangan||'')+'</td><td class="r">'+fmt2(r.debet)+'</td><td class="r">'+fmt2(r.kredit)+'</td></tr>'; }).join('');
-      return '<div class="pos-h">REKAP '+kat.namaKategori+'</div>'
+      return '<div class="pgpos"><div class="pos-h">REKAP '+kat.namaKategori+'</div>'
         +'<table class="t"><thead><tr><th class="c" style="width:6%;">No</th><th style="width:14%;">Tanggal</th><th>Keterangan</th><th class="r" style="width:18%;">Debet</th><th class="r" style="width:18%;">Kredit</th></tr></thead>'
         +'<tbody>'+body+'</tbody>'
-        +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table>';
+        +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table></div>';
     }).join('');
     if(adaLampiran){
       halaman3 = '<div class="pg pb">'
         + '<div class="doc-title">LAMPIRAN — RINCIAN ITEM NON-UNIT</div>'
-        + '<p style="font-size:7.5pt;color:#000;font-weight:bold;text-align:center;margin:-6px 0 10px;">(Referensi/backup — angka sudah termasuk di REKAP REKENING KORAN halaman 1, TIDAK diperhitungkan ulang di sini)</p>'
         + isiLampiran + '</div>';
     }
   }
@@ -2874,9 +2905,44 @@ function renderUnitTable(){
     var btnDown = '<button class="btn btn-sm btn-outline-secondary me-1" '+(i===list.length-1?'disabled':'')+' onclick="geserUrutanUnit(\''+u.kodeUnit+'\',1)" title="Turunkan urutan"><i class="fas fa-arrow-down"></i></button>';
     return '<tr><td>'+u.kodeUnit+'</td><td>'+u.namaUnit+(u.aktif?'':' <span class="text-muted small">(nonaktif)</span>')+'</td>'+
       '<td class="text-nowrap">'+btnUp+btnDown+'<button class="btn btn-sm btn-outline-secondary me-1" onclick="bukaEditUnit(\''+u.kodeUnit+'\')" title="Edit"><i class="fas fa-edit"></i></button>'+
+      '<button class="btn btn-sm btn-outline-secondary me-1" onclick="bukaGantiKodeUnit(\''+u.kodeUnit+'\')" title="Ganti Kode Unit"><i class="fas fa-barcode"></i></button>'+
       '<button class="btn btn-sm btn-outline-danger" onclick="hapusUnit(\''+u.kodeUnit+'\')"><i class="fas fa-trash"></i></button></td></tr>';
   }).join('');
 }
+// Ganti KODE Unit (bukan sekadar nama) — dipisah dari form Edit biasa karena
+// ini operasi berisiko: kodeUnit dipakai sebagai kunci acuan di Pos, hak
+// akses User, DAN seluruh baris transaksi historis di semua tahun. Backend
+// (gantiKodeUnit) sudah menangani migrasi semuanya sekaligus dengan aman,
+// di sini cukup minta kode baru + beri peringatan jelas sebelum jalan.
+function bukaGantiKodeUnit(kodeLama){
+  var u = _unitPosData.units.filter(function(x){return x.kodeUnit===kodeLama;})[0];
+  Swal.fire({
+    title: 'Ganti Kode Unit',
+    html: '<p class="text-start small text-muted mb-2">Unit: <b>'+_gcEsc(u?u.namaUnit:kodeLama)+'</b> (kode saat ini: <code>'+_gcEsc(kodeLama)+'</code>)<br>Semua Pos, hak akses User, dan SELURUH transaksi historis di semua tahun akan otomatis ikut diperbarui ke kode baru. Proses ini butuh beberapa saat untuk data yang banyak.</p>',
+    input: 'text',
+    inputLabel: 'Kode Unit baru',
+    inputValue: kodeLama,
+    showCancelButton: true,
+    confirmButtonText: 'Ganti Kode',
+    confirmButtonColor: '#800000',
+    inputValidator: function(v){ if(!v || !v.trim()) return 'Kode baru wajib diisi'; }
+  }).then(function(r){
+    if(!r.isConfirmed) return;
+    var kodeBaru = r.value.trim().toUpperCase();
+    if(kodeBaru === kodeLama) return;
+    Swal.fire({ title:'Memproses...', text:'Memperbarui seluruh data historis, mohon tunggu.', allowOutsideClick:false, didOpen:function(){ Swal.showLoading(); } });
+    gasCall('gantiKodeUnit', kodeLama, kodeBaru, STATE.username, STATE.token).then(function(res){
+      Swal.close();
+      if(!res.success){ toast('error', res.message); return; }
+      toast('success','Kode Unit diganti jadi "'+kodeBaru+'"'+(res.jumlahBarisDiubah!==undefined ? ' ('+res.jumlahBarisDiubah+' baris transaksi ikut diperbarui)' : ''));
+      loadUnitPos();
+    }).catch(function(){ Swal.close(); toast('error','Gagal mengganti kode'); });
+  });
+}
+// Geser urutan Unit satu posisi (naik=-1 / turun=+1). Ditukar dulu di UI
+// (optimistic) biar responsif, lalu urutan lengkap terbaru dikirim ke server
+// untuk disimpan permanen di kolom "Urutan" sheet Unit.
+
 // Geser urutan Unit satu posisi (naik=-1 / turun=+1). Ditukar dulu di UI
 // (optimistic) biar responsif, lalu urutan lengkap terbaru dikirim ke server
 // untuk disimpan permanen di kolom "Urutan" sheet Unit.
@@ -3162,6 +3228,7 @@ function loadSetupView(){
     STATE.kodeRekeningKasBank = res.kodeRekeningKasBank || '';
   });
   renderDaftarKecualikanMemorial();
+  renderDaftarSelaluPisahMemorial();
 }
 function renderDaftarKecualikanMemorial(){
   var el = document.getElementById('daftar-kecualikan-memorial');
@@ -3180,6 +3247,58 @@ function toggleKecualikanMemorial(kode, dicentang){
   gasCall('setSertakanMemorial', 'kategori', kode, !dicentang, STATE.token).then(function(res){
     if(!res.success){ toast('error', res.message); renderDaftarKecualikanMemorial(); return; }
     toast('success','Tersimpan');
+  });
+}
+// Daftar Pos "Selalu Pisah Otomatis" — dikelompokkan per Unit (dengan
+// checkbox "centang semua" per Unit) supaya gampang kalau Anda mau SATU
+// UNIT PENUH selalu terpisah (mis. LPPM), tidak perlu klik satu-satu.
+function renderDaftarSelaluPisahMemorial(){
+  var el = document.getElementById('daftar-selalu-pisah-memorial');
+  if(!el) return;
+  gasCall('getUnitPosList', STATE.token).then(function(res){
+    if(!res.success) return;
+    var byUnit = {};
+    res.data.pos.forEach(function(p){ (byUnit[p.kodeUnit] = byUnit[p.kodeUnit] || []).push(p); });
+    var idxUnit = {}; res.data.units.forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
+    var kodeUnitUrut = Object.keys(byUnit).sort(function(a,b){
+      var ia = idxUnit.hasOwnProperty(a) ? idxUnit[a] : 9999;
+      var ib = idxUnit.hasOwnProperty(b) ? idxUnit[b] : 9999;
+      return ia - ib;
+    });
+    if(!kodeUnitUrut.length){ el.innerHTML = '<p class="text-muted small mb-0">Belum ada Pos. Buat dulu di Kelola Unit &amp; Pos.</p>'; return; }
+    el.innerHTML = kodeUnitUrut.map(function(ku){
+      var namaUnit = (res.data.units.filter(function(u){return u.kodeUnit===ku;})[0]||{}).namaUnit || ku;
+      var daftarPos = byUnit[ku];
+      var semuaTercentang = daftarPos.every(function(p){ return p.selaluPisahMemorial; });
+      var baris = daftarPos.map(function(p){
+        var checked = p.selaluPisahMemorial ? 'checked' : '';
+        return '<div class="form-check py-1 ms-3"><input class="form-check-input" type="checkbox" '+checked+' id="sp-'+p.kodePos+'" onchange="toggleSelaluPisahMemorial(\''+p.kodePos+'\', this.checked)">'
+          +'<label class="form-check-label" for="sp-'+p.kodePos+'">'+_gcEsc(p.namaPos)+'</label></div>';
+      }).join('');
+      return '<div class="mb-2 pb-2 border-bottom">'
+        + '<div class="form-check"><input class="form-check-input" type="checkbox" '+(semuaTercentang?'checked':'')+' id="sp-unit-'+ku+'" onchange="toggleSelaluPisahMemorialUnit(\''+ku+'\', this.checked)">'
+        + '<label class="form-check-label fw-bold" for="sp-unit-'+ku+'">'+_gcEsc(namaUnit)+' <span class="text-muted fw-normal small">(centang semua Pos di unit ini)</span></label></div>'
+        + baris
+        + '</div>';
+    }).join('');
+  });
+}
+function toggleSelaluPisahMemorial(kodePos, dicentang){
+  gasCall('setSelaluPisahMemorial', kodePos, dicentang, STATE.token).then(function(res){
+    if(!res.success){ toast('error', res.message); renderDaftarSelaluPisahMemorial(); return; }
+    toast('success','Tersimpan');
+  });
+}
+// Centang/hapus centang SEMUA Pos di 1 Unit sekaligus — kirim satu per satu
+// ke server (masing-masing Pos baris sendiri di sheet), tapi cukup 1 klik
+// dari sisi Admin. Render ulang di akhir supaya kalau ada yang gagal
+// kelihatan jelas mana yang beneran tersimpan.
+function toggleSelaluPisahMemorialUnit(kodeUnit, dicentang){
+  gasCall('getUnitPosList', STATE.token).then(function(res){
+    if(!res.success) return;
+    var daftarPos = res.data.pos.filter(function(p){ return p.kodeUnit===kodeUnit; });
+    Promise.all(daftarPos.map(function(p){ return gasCall('setSelaluPisahMemorial', p.kodePos, dicentang, STATE.token); }))
+      .then(function(){ toast('success','Tersimpan untuk '+daftarPos.length+' Pos'); renderDaftarSelaluPisahMemorial(); });
   });
 }
 function submitSetup(e){
@@ -3337,8 +3456,19 @@ function _prosesDataMentahMemorial(rekap, tb, kategoriList, daftarUnitTerbaru, d
     MEMORIAL_STATE.rawRows = rows;
 
     var ambang = angkaKeAngka(document.getElementById('mem-ambang').value) || 0;
+    // Pos yang ditandai "Selalu Pisah Otomatis" di Pengaturan -> SEMUA
+    // transaksinya (apa pun sisi & nominalnya) otomatis dipisah, melewati
+    // aturan Debet/Ambang di bawah.
+    var selaluPisahPos = {}; posList.forEach(function(p){ if(p.selaluPisahMemorial) selaluPisahPos[p.kodePos] = true; });
     MEMORIAL_STATE.pisahIds = {};
-    if(ambang > 0) rows.forEach(function(r){ if(Math.max(r.debet, r.kredit) >= ambang) MEMORIAL_STATE.pisahIds[r.id] = true; });
+    rows.forEach(function(r){
+      var wajibPisah = r.sumber==='pos' && selaluPisahPos[r.kode];
+      // Transaksi Debet SELALU otomatis diusulkan pisah, apa pun nominalnya
+      // (beda dari Kredit yang baru diusulkan pisah kalau lewat Ambang Rp).
+      var debetOtomatis = r.debet > 0;
+      var lewatAmbang = ambang > 0 && Math.max(r.debet, r.kredit) >= ambang;
+      if(wajibPisah || debetOtomatis || lewatAmbang) MEMORIAL_STATE.pisahIds[r.id] = true;
+    });
 
     renderMemorialChecklist();
     renderMemorialList();
