@@ -717,7 +717,7 @@ function gasCallBatch(calls){
   .catch(function(err){ throw (err instanceof Error) ? err : new Error(String(err)); });
 }
 
-function gasCall(fnName){
+function _gasCallFetch(fnName){
   var args = Array.prototype.slice.call(arguments, 1);
   if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.indexOf('TEMPEL_URL_WEB_APP') !== -1) {
     return Promise.reject(new Error('GAS_WEB_APP_URL belum diisi. Deploy Code.gs sebagai Web App (Anyone), lalu tempel URL-nya di bagian atas index.html.'));
@@ -743,6 +743,30 @@ function gasCall(fnName){
   })
   .catch(function(err){
     throw (err instanceof Error) ? err : new Error(String(err));
+  });
+}
+// PERBAIKAN LOCK SERVICE: backend mengunci SEMUA proses simpan/edit/hapus
+// lewat 1 kunci global (LockService), supaya data tidak pernah tabrakan --
+// tapi konsekuensinya, kalau beberapa orang menyimpan BERSAMAAN, yang
+// gilirannya belum dapat akan langsung dijawab "Sistem sedang memproses
+// permintaan lain" begitu 10 detik terlewati menunggu. Sebelumnya ini
+// langsung ditampilkan sebagai error ke user, padahal biasanya cuma perlu
+// nunggu sebentar giliran. Sekarang gasCall() otomatis MENCOBA ULANG sampai
+// 3x dengan jeda singkat sebelum benar-benar menyerah -- aman diulang
+// karena permintaan tulis data selalu bawa idKey (idempotency), jadi tidak
+// akan pernah tersimpan dobel walau dicoba beberapa kali.
+var LOCK_BUSY_MSG = 'Sistem sedang memproses permintaan lain, coba lagi sebentar.';
+function gasCall(fnName){
+  var args = Array.prototype.slice.call(arguments, 1);
+  return _gasCallDenganRetry(fnName, args, 0);
+}
+function _gasCallDenganRetry(fnName, args, percobaan){
+  return _gasCallFetch.apply(null, [fnName].concat(args)).then(function(res){
+    if(res && res.success === false && res.message === LOCK_BUSY_MSG && percobaan < 3){
+      return new Promise(function(r){ setTimeout(r, 700 * (percobaan + 1)); })
+        .then(function(){ return _gasCallDenganRetry(fnName, args, percobaan + 1); });
+    }
+    return res;
   });
 }
 
@@ -1031,6 +1055,7 @@ function initInputView(){
   initBulanSelect('sel-bulan-input', function(){
     loadRekapBulan();
     if(!document.getElementById('panel-input-nonunit').classList.contains('d-none')) loadTambahanForInput();
+    _gcRefreshRentangTanggal(); // update batas tanggal di baris grid yang sudah ada, tanpa menghapus isiannya
   });
   initGridCepat();
 }
@@ -1542,10 +1567,11 @@ function editTransaksi(id){
   var r = _arrTransaksiAktif().filter(function(d){return d.id===id;})[0];
   if(!r) return;
   var bulan = document.getElementById('sel-bulan-input').value;
+  var rentangEd = _rentangTanggalBulanInput();
   Swal.fire({
     title:'Edit Transaksi',
     html:'<div style="text-align:left;">'
-      +'<label class="form-label small mb-1">Tanggal</label><input type="date" id="ed-tgl" class="form-control form-control-sm mb-2" value="'+(r.tanggal||'')+'">'
+      +'<label class="form-label small mb-1">Tanggal</label><input type="date" id="ed-tgl" class="form-control form-control-sm mb-2" value="'+(r.tanggal||'')+'" min="'+rentangEd.min+'" max="'+rentangEd.max+'">'
       +'<label class="form-label small mb-1">Keterangan</label><input type="text" id="ed-ket" class="form-control form-control-sm mb-2" value="'+_gcEsc(r.keterangan||'')+'">'
       +'<div class="row g-2"><div class="col-6"><label class="form-label small mb-1">Debet</label><input type="text" inputmode="decimal" id="ed-debet" class="form-control form-control-sm text-end" value="'+fmtRp(r.debet)+'" oninput="formatAngkaLive(this)" onblur="finalisasiAngka(this)" onfocus="this.select()"></div>'
       +'<div class="col-6"><label class="form-label small mb-1">Kredit</label><input type="text" inputmode="decimal" id="ed-kredit" class="form-control form-control-sm text-end" value="'+fmtRp(r.kredit)+'" oninput="formatAngkaLive(this)" onblur="finalisasiAngka(this)" onfocus="this.select()"></div></div>'
@@ -1648,21 +1674,47 @@ function initGridCepat(){
   gcRender();
 }
 
+// PERBAIKAN: batasi date picker supaya cuma bisa pilih tanggal DI DALAM
+// bulan/tahun yang sedang dibuka di "Input Rekap Bulanan" -- mencegah salah
+// klik/ketik tanggal yang bikin transaksi nyasar ke bulan lain (yang baru
+// ketahuan belakangan & sulit dilacak setelah tersimpan). Backend tetap
+// menolak juga kalau ada yang lolos (mis. dari tempel massal), ini di sisi
+// tampilan supaya kesalahan itu dicegah dari awal, bukan cuma ditolak pas
+// simpan.
+function _rentangTanggalBulanInput(){
+  var bulan = parseInt(document.getElementById('sel-bulan-input').value, 10);
+  var tahun = STATE.tahunAktif;
+  if(!bulan || !tahun) return { min:'', max:'' };
+  var akhir = new Date(tahun, bulan, 0).getDate(); // hari terakhir bulan itu
+  var p2 = function(n){ return String(n).length<2 ? '0'+n : ''+n; };
+  return { min: tahun+'-'+p2(bulan)+'-01', max: tahun+'-'+p2(bulan)+'-'+p2(akhir) };
+}
+// Dipanggil begitu filter bulan/tahun diganti — baris grid yang SUDAH ADA
+// (belum tentu masih kosong) diberi batas tanggal baru sesuai bulan yang
+// baru dipilih, TANPA menghapus isian yang sudah diketik user.
+function _gcRefreshRentangTanggal(){
+  var rentang = _rentangTanggalBulanInput();
+  document.querySelectorAll('#tbody-gc input[type="date"]').forEach(function(inp){
+    inp.min = rentang.min; inp.max = rentang.max;
+  });
+}
 function gcRender(){
   var tb = document.getElementById('tbody-gc');
   if(!tb) return;
-  tb.innerHTML = _gcRows.map(function(r,i){ return gcRowHtml(r,i); }).join('');
+  var rentang = _rentangTanggalBulanInput();
+  tb.innerHTML = _gcRows.map(function(r,i){ return gcRowHtml(r,i,rentang); }).join('');
   gcHitung();
 }
 
-function gcRowHtml(r,i){
+function gcRowHtml(r,i,rentang){
+  rentang = rentang || _rentangTanggalBulanInput();
   var dStr = r.debet>0 ? fmtRp(r.debet) : '';
   var kStr = r.kredit>0 ? fmtRp(r.kredit) : '';
   return '<tr id="gc-tr-'+r.id+'">'
     + '<td class="tx-col-icon">'+(i+1)+'</td>'
-    + '<td><input type="date" class="form-control form-control-sm px-1" style="font-size:.78rem;" value="'+_gcEsc(r.tgl)+'"'
+    + '<td><input type="date" class="form-control form-control-sm px-1" style="font-size:.78rem;" value="'+_gcEsc(r.tgl)+'" min="'+rentang.min+'" max="'+rentang.max+'"'
         + ' onchange="gcUpd('+r.id+',\'tgl\',this.value)" onkeydown="gcKey(event,'+r.id+',\'tgl\')"></td>'
-    + '<td><div class="tx-pos-wrap">'
+        + '<td><div class="tx-pos-wrap">'
         + '<input type="text" class="form-control form-control-sm tx-pos-input" style="caret-color:auto;cursor:text;" autocomplete="off" placeholder="- Pilih Unit \u2192 Pos -"'
           + ' value="'+_gcEsc(r.posLabel)+'" id="gc-pos-'+r.id+'"'
           + ' onfocus="gcPosFocus('+r.id+')" oninput="gcPosInput('+r.id+')" onkeydown="gcPosKey(event,'+r.id+')" onblur="gcPosBlur('+r.id+')">'
@@ -2653,6 +2705,9 @@ function loadTambahanForInput(){
   if(STATE.role!=='ADMIN') return; // item non-unit memang cuma untuk Admin
   var bulan = document.getElementById('sel-bulan-input').value;
   if(!bulan) return;
+  var rentangTb = _rentangTanggalBulanInput();
+  var elTbTgl = document.getElementById('tb-tanggal');
+  if(elTbTgl){ elTbTgl.min = rentangTb.min; elTbTgl.max = rentangTb.max; }
   var key = STATE.tahunAktif + '_' + bulan;
   if(CACHE.tambahan[key] && CACHE.kategoriTambahan) renderTambahanInputPanel(); else showBar();
   Promise.all([
@@ -3294,16 +3349,19 @@ function toggleSelaluPisahMemorial(kodePos, dicentang){
     toast('success','Tersimpan');
   });
 }
-// Centang/hapus centang SEMUA Pos di 1 Unit sekaligus — kirim satu per satu
-// ke server (masing-masing Pos baris sendiri di sheet), tapi cukup 1 klik
-// dari sisi Admin. Render ulang di akhir supaya kalau ada yang gagal
-// kelihatan jelas mana yang beneran tersimpan.
+// Centang/hapus centang SEMUA Pos di 1 Unit sekaligus — dulu kirim satu per
+// satu ke server (N kunci+baca+tulis terpisah untuk N Pos), sekarang cukup
+// 1 panggilan borongan (setSelaluPisahMemorialBulk), jauh lebih cepat kalau
+// Pos di unit itu banyak.
 function toggleSelaluPisahMemorialUnit(kodeUnit, dicentang){
   gasCall('getUnitPosList', STATE.token).then(function(res){
     if(!res.success) return;
-    var daftarPos = res.pos.filter(function(p){ return p.kodeUnit===kodeUnit; });
-    Promise.all(daftarPos.map(function(p){ return gasCall('setSelaluPisahMemorial', p.kodePos, dicentang, STATE.token); }))
-      .then(function(){ toast('success','Tersimpan untuk '+daftarPos.length+' Pos'); renderDaftarSelaluPisahMemorial(); });
+    var daftarKodePos = res.pos.filter(function(p){ return p.kodeUnit===kodeUnit; }).map(function(p){ return p.kodePos; });
+    gasCall('setSelaluPisahMemorialBulk', daftarKodePos, dicentang, STATE.token).then(function(r2){
+      if(!r2.success){ toast('error', r2.message); renderDaftarSelaluPisahMemorial(); return; }
+      toast('success','Tersimpan untuk '+r2.jumlah+' Pos');
+      renderDaftarSelaluPisahMemorial();
+    });
   });
 }
 function submitSetup(e){
