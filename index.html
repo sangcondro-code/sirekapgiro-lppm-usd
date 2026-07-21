@@ -191,6 +191,7 @@
     <div class="nav-label">Menu</div>
     <div class="nav-item active" data-view="dashboard" onclick="gotoView('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</div>
     <div class="nav-item" data-view="input" onclick="gotoView('input')"><i class="fas fa-edit"></i> Input Rekap Bulanan</div>
+    <div class="nav-item admin-only" data-view="rekkoran" onclick="gotoView('rekkoran')"><i class="fas fa-list-ol"></i> Rekap Rekening Koran</div>
     <div class="nav-item unit-only" data-view="pos" onclick="gotoView('pos')"><i class="fas fa-tags"></i> Kelola Pos</div>
     <div class="nav-item" data-view="konsolidasi" onclick="gotoView('konsolidasi')"><i class="fas fa-layer-group"></i> Rekap Konsolidasi</div>
     <div class="nav-item admin-only" data-view="memorial" onclick="gotoView('memorial')"><i class="fas fa-file-invoice"></i> Jurnal Memorial</div>
@@ -297,6 +298,27 @@
           <tfoot><tr><td class="no-print"></td><td colspan="4">TOTAL</td><td id="tot-debet-tambahan" class="text-end">0</td><td id="tot-kredit-tambahan" class="text-end">0</td><td class="no-print"></td></tr></tfoot></table></div>
         </div></div>
       </div>
+    </div>
+
+    <!-- REKAP REKENING KORAN — tabel GABUNGAN semua Unit/Pos, urut tanggal,
+         khusus untuk disamakan urutannya PERSIS dengan rekening koran/
+         e-statement fisik dari bank (drag & drop, tersimpan ke database). -->
+    <div id="view-rekkoran" class="view d-none">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="page-title mb-0">Rekap Rekening Koran</h5>
+        <div class="d-flex gap-2">
+          <select id="sel-bulan-rekkoran" class="form-select form-select-sm" style="width:auto;" onchange="loadRekapRekeningKoran()"></select>
+          <select id="sel-unit-rekkoran" class="form-select form-select-sm" style="width:auto;" onchange="loadRekapRekeningKoran()"><option value="">- Semua Unit -</option></select>
+        </div>
+      </div>
+      <p class="text-muted small mb-2">Tabel gabungan semua Unit &amp; Pos, urut tanggal — geser baris (ikon &#10021;) untuk menyamakan urutan persis dengan rekening koran/e-statement fisik dari bank. Perubahan tersimpan otomatis.</p>
+      <div class="card"><div class="card-body">
+        <div class="table-responsive"><table class="table tbl mb-0">
+          <thead><tr><th style="width:4%;">No</th><th style="width:6%;"></th><th style="width:11%;">Tanggal</th><th>Keterangan</th><th class="text-end" style="width:13%;">Debet</th><th class="text-end" style="width:13%;">Kredit</th><th style="width:12%;">Unit</th><th class="no-print" style="width:9%;">Aksi</th></tr></thead>
+          <tbody id="tbody-rekkoran"></tbody>
+          <tfoot><tr><td colspan="4">TOTAL</td><td id="tot-debet-rekkoran" class="text-end">0</td><td id="tot-kredit-rekkoran" class="text-end">0</td><td colspan="2"></td></tr></tfoot>
+        </table></div>
+      </div></div>
     </div>
 
     <!-- KELOLA POS (UNIT — self-service) -->
@@ -986,6 +1008,7 @@ function gotoView(name){
   document.getElementById('sidebar').classList.remove('open');
   if(name==='dashboard') loadDashboard();
   if(name==='input') initInputView();
+  if(name==='rekkoran') initBulanSelect('sel-bulan-rekkoran', loadRekapRekeningKoran);
   if(name==='pos') renderPosUnitSayaForm();
   if(name==='konsolidasi') initBulanSelect('sel-bulan-konsolidasi', loadKonsolidasi);
   if(name==='unit') loadUnitPos();
@@ -1609,6 +1632,148 @@ function hapusTransaksi(id){
       if(!r.success){ if(backup) arr.splice(idx,0,backup); renderTransaksiTable(); toast('error', r.message); return; }
       toast('success','Terhapus');
     }).catch(function(){ if(backup) arr.splice(idx,0,backup); renderTransaksiTable(); toast('error','Gagal menghapus (dikembalikan)'); });
+  });
+}
+// ============================================================
+// REKAP REKENING KORAN — tabel GABUNGAN semua Unit & Pos jadi satu, urut
+// tanggal, bisa digeser manual (drag & drop) untuk menyamakan urutan PERSIS
+// dengan rekening koran/e-statement fisik dari bank (berbeda dari "Input
+// Rekap Bulanan" yang per-Pos). Urutan hasil geser tersimpan ke database
+// lewat kolom "UrutanKoran" tersendiri di backend — TIDAK mengganggu urutan
+// per-Pos yang sudah ada.
+// ============================================================
+var _rekKoranRows = [];
+var _rekKoranUnitNama = {};
+function loadRekapRekeningKoran(){
+  var bulan = document.getElementById('sel-bulan-rekkoran').value;
+  var kodeUnit = document.getElementById('sel-unit-rekkoran').value;
+  if(!bulan) return;
+  showBar();
+  gasCall('getRekapRekeningKoran', STATE.tahunAktif, bulan, kodeUnit || null, STATE.token).then(function(res){
+    hideBar();
+    if(!res.success){ toast('error', res.message); return; }
+    _rekKoranRows = res.data;
+    (res.units||[]).forEach(function(u){ _rekKoranUnitNama[u.kodeUnit] = u.namaUnit; });
+    // Isi dropdown filter Unit sekali saja (kalau belum pernah diisi)
+    var selUnit = document.getElementById('sel-unit-rekkoran');
+    if(selUnit.options.length <= 1 && res.units && res.units.length){
+      selUnit.innerHTML = '<option value="">- Semua Unit -</option>' + res.units.map(function(u){ return '<option value="'+u.kodeUnit+'">'+_gcEsc(u.namaUnit)+'</option>'; }).join('');
+      selUnit.value = kodeUnit || '';
+    }
+    renderRekeningKoranTable();
+  }).catch(function(){ hideBar(); toast('error','Gagal memuat data'); });
+}
+function renderRekeningKoranTable(){
+  var tb = document.getElementById('tbody-rekkoran');
+  if(!tb) return;
+  var d=0, k=0;
+  tb.innerHTML = _rekKoranRows.map(function(r,i){
+    d+=r.debet; k+=r.kredit;
+    var namaUnit = _rekKoranUnitNama[r.kodeUnit] || r.kodeUnit || '';
+    return '<tr ondragover="rkDragOver(event)" ondragleave="rkDragLeave(event)" ondrop="rkDrop(event,\''+r.id+'\')" ondragend="rkDragEnd(event)">'
+      + '<td class="tx-col-icon">'+(i+1)+'</td>'
+      + '<td class="no-print tx-drag-handle tx-col-icon" draggable="true" ondragstart="rkDragStart(event,\''+r.id+'\')" title="Tahan &amp; geser untuk urutkan"><i class="fas fa-grip-vertical"></i></td>'
+      + '<td>'+r.tanggal+'</td>'
+      + '<td class="tx-col-clip" title="'+_gcEsc(r.keterangan||'')+'">'+_gcEsc(r.keterangan||'')+'</td>'
+      + '<td class="text-end">'+(r.debet?fmtRp(r.debet):'&mdash;')+'</td>'
+      + '<td class="text-end">'+(r.kredit?fmtRp(r.kredit):'&mdash;')+'</td>'
+      + '<td class="tx-col-clip">'+_gcEsc(namaUnit)+'</td>'
+      + '<td class="no-print tx-aksi"><button class="btn btn-sm btn-outline-secondary me-1" onclick="editTransaksiRK(\''+r.id+'\')"><i class="fas fa-edit"></i></button>'
+      + '<button class="btn btn-sm btn-outline-danger" onclick="hapusTransaksiRK(\''+r.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
+  }).join('') || '<tr><td colspan="8" class="text-center text-muted">Belum ada data bulan ini</td></tr>';
+  document.getElementById('tot-debet-rekkoran').textContent = fmtRp(d);
+  document.getElementById('tot-kredit-rekkoran').textContent = fmtRp(k);
+}
+var _dragRK = null;
+function rkDragStart(e, id){
+  _dragRK = id;
+  try{ e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); }catch(err){}
+  var tr = e.target.closest('tr'); if(tr) tr.classList.add('tx-dragging');
+}
+function rkDragOver(e){
+  e.preventDefault();
+  try{ e.dataTransfer.dropEffect = 'move'; }catch(err){}
+  var tr = e.currentTarget;
+  var rect = tr.getBoundingClientRect();
+  var taruhSebelum = e.clientY < (rect.top + rect.height/2);
+  tr.classList.remove('tx-drop-before','tx-drop-after');
+  tr.classList.add(taruhSebelum ? 'tx-drop-before' : 'tx-drop-after');
+}
+function rkDragLeave(e){ e.currentTarget.classList.remove('tx-drop-before','tx-drop-after'); }
+function rkDrop(e, targetId){
+  e.preventDefault();
+  var taruhSebelum = e.currentTarget.classList.contains('tx-drop-before');
+  document.querySelectorAll('.tx-drop-before,.tx-drop-after').forEach(function(el){ el.classList.remove('tx-drop-before','tx-drop-after'); });
+  if(!_dragRK || _dragRK === targetId) return;
+  var di = _rekKoranRows.findIndex(function(r){ return r.id===_dragRK; });
+  if(di<0) return;
+  var dragged = _rekKoranRows.splice(di,1)[0];
+  var ti = _rekKoranRows.findIndex(function(r){ return r.id===targetId; });
+  var insertAt = ti<0 ? _rekKoranRows.length : (taruhSebelum ? ti : ti+1);
+  _rekKoranRows.splice(insertAt, 0, dragged);
+  renderRekeningKoranTable(); // optimistic: langsung kelihatan urutan barunya
+  var bulan = document.getElementById('sel-bulan-rekkoran').value;
+  gasCall('reorderRekeningKoranGlobal', STATE.tahunAktif, bulan, _rekKoranRows.map(function(r){return r.id;}), STATE.token).then(function(res){
+    if(!res.success){ toast('error', res.message); loadRekapRekeningKoran(); }
+  }).catch(function(){ toast('error','Gagal menyimpan urutan'); loadRekapRekeningKoran(); });
+}
+function rkDragEnd(){
+  document.querySelectorAll('.tx-dragging').forEach(function(el){ el.classList.remove('tx-dragging'); });
+  document.querySelectorAll('.tx-drop-before,.tx-drop-after').forEach(function(el){ el.classList.remove('tx-drop-before','tx-drop-after'); });
+}
+function editTransaksiRK(id){
+  var r = _rekKoranRows.filter(function(d){return d.id===id;})[0];
+  if(!r) return;
+  var bulan = document.getElementById('sel-bulan-rekkoran').value;
+  var rentangEd = _rentangTanggalBulanInput ? (function(){
+    // _rentangTanggalBulanInput() sengaja mengacu ke filter bulan "Input
+    // Rekap Bulanan", di sini kita hitung ulang sendiri sesuai filter bulan
+    // di halaman Rekap Rekening Koran supaya tetap akurat.
+    var akhir = new Date(STATE.tahunAktif, bulan, 0).getDate();
+    var p2 = function(n){ return String(n).length<2 ? '0'+n : ''+n; };
+    return { min: STATE.tahunAktif+'-'+p2(bulan)+'-01', max: STATE.tahunAktif+'-'+p2(bulan)+'-'+p2(akhir) };
+  })() : { min:'', max:'' };
+  Swal.fire({
+    title:'Edit Transaksi',
+    html:'<div style="text-align:left;">'
+      +'<label class="form-label small mb-1">Tanggal</label><input type="date" id="ed-tgl" class="form-control form-control-sm mb-2" value="'+(r.tanggal||'')+'" min="'+rentangEd.min+'" max="'+rentangEd.max+'">'
+      +'<label class="form-label small mb-1">Keterangan</label><input type="text" id="ed-ket" class="form-control form-control-sm mb-2" value="'+_gcEsc(r.keterangan||'')+'">'
+      +'<div class="row g-2"><div class="col-6"><label class="form-label small mb-1">Debet</label><input type="text" inputmode="decimal" id="ed-debet" class="form-control form-control-sm text-end" value="'+fmtRp(r.debet)+'" oninput="formatAngkaLive(this)" onblur="finalisasiAngka(this)" onfocus="this.select()"></div>'
+      +'<div class="col-6"><label class="form-label small mb-1">Kredit</label><input type="text" inputmode="decimal" id="ed-kredit" class="form-control form-control-sm text-end" value="'+fmtRp(r.kredit)+'" oninput="formatAngkaLive(this)" onblur="finalisasiAngka(this)" onfocus="this.select()"></div></div>'
+      +'</div>',
+    confirmButtonText:'Simpan', confirmButtonColor:'#800000', showCancelButton:true, cancelButtonText:'Batal',
+    preConfirm:function(){
+      var tgl = document.getElementById('ed-tgl').value;
+      if(!tgl){ Swal.showValidationMessage('Tanggal wajib diisi.'); return false; }
+      return { kodePos:r.kodePos, tanggal:tgl, keterangan:document.getElementById('ed-ket').value,
+               debet:angkaKeAngka(document.getElementById('ed-debet').value), kredit:angkaKeAngka(document.getElementById('ed-kredit').value) };
+    }
+  }).then(function(res){
+    if(!res.isConfirmed) return;
+    var idx = _rekKoranRows.findIndex(function(d){return d.id===id;});
+    var backup = idx>-1 ? Object.assign({}, _rekKoranRows[idx]) : null;
+    if(idx>-1) Object.assign(_rekKoranRows[idx], res.value);
+    renderRekeningKoranTable();
+    gasCall('updateTransaksi', STATE.tahunAktif, bulan, id, res.value, STATE.token).then(function(rr){
+      if(!rr.success){ if(backup && idx>-1) _rekKoranRows[idx]=backup; renderRekeningKoranTable(); toast('error', rr.message); return; }
+      delete CACHE.rekap[STATE.tahunAktif + '_' + bulan]; // data yang sama juga tampil di "Input Rekap Bulanan" -> jangan sampai basi di sana (pakai bulan di HALAMAN INI, bukan filter halaman lain)
+      toast('success','Tersimpan');
+    }).catch(function(){ if(backup && idx>-1) _rekKoranRows[idx]=backup; renderRekeningKoranTable(); toast('error','Gagal menyimpan (dikembalikan)'); });
+  });
+}
+function hapusTransaksiRK(id){
+  Swal.fire({title:'Hapus transaksi ini?', icon:'warning', showCancelButton:true, confirmButtonText:'Hapus', confirmButtonColor:'#dc2626'}).then(function(res){
+    if(!res.isConfirmed) return;
+    var bulan = document.getElementById('sel-bulan-rekkoran').value;
+    var idx = _rekKoranRows.findIndex(function(d){return d.id===id;});
+    var backup = idx>-1 ? _rekKoranRows[idx] : null;
+    if(idx>-1) _rekKoranRows.splice(idx,1);
+    renderRekeningKoranTable();
+    gasCall('deleteTransaksi', STATE.tahunAktif, bulan, id, STATE.token).then(function(r){
+      if(!r.success){ if(backup) _rekKoranRows.splice(idx,0,backup); renderRekeningKoranTable(); toast('error', r.message); return; }
+      delete CACHE.rekap[STATE.tahunAktif + '_' + bulan];
+      toast('success','Terhapus');
+    }).catch(function(){ if(backup) _rekKoranRows.splice(idx,0,backup); renderRekeningKoranTable(); toast('error','Gagal menghapus (dikembalikan)'); });
   });
 }
 // ============================================================
