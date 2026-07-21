@@ -3256,7 +3256,7 @@ function renderDaftarSelaluPisahMemorial(){
   var el = document.getElementById('daftar-selalu-pisah-memorial');
   if(!el) return;
   gasCall('getUnitPosList', STATE.token).then(function(res){
-    if(!res.success) return;
+    if(!res.success){ el.innerHTML = '<p class="text-danger small mb-0">Gagal memuat: '+_gcEsc(res.message||'')+'</p>'; return; }
     var byUnit = {};
     res.data.pos.forEach(function(p){ (byUnit[p.kodeUnit] = byUnit[p.kodeUnit] || []).push(p); });
     var idxUnit = {}; res.data.units.forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
@@ -3281,7 +3281,7 @@ function renderDaftarSelaluPisahMemorial(){
         + baris
         + '</div>';
     }).join('');
-  });
+  }).catch(function(err){ el.innerHTML = '<p class="text-danger small mb-0">Gagal memuat: '+_gcEsc((err && err.message) || 'periksa koneksi & coba lagi')+'</p>'; });
 }
 function toggleSelaluPisahMemorial(kodePos, dicentang){
   gasCall('setSelaluPisahMemorial', kodePos, dicentang, STATE.token).then(function(res){
