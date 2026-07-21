@@ -3257,9 +3257,14 @@ function renderDaftarSelaluPisahMemorial(){
   if(!el) return;
   gasCall('getUnitPosList', STATE.token).then(function(res){
     if(!res.success){ el.innerHTML = '<p class="text-danger small mb-0">Gagal memuat: '+_gcEsc(res.message||'')+'</p>'; return; }
+    // PERBAIKAN BUG: getUnitPosList() mengembalikan {success, units, pos}
+    // LANGSUNG (bukan dibungkus {data:{units,pos}}) -- sebelumnya salah asumsi
+    // struktur, jadi res.data selalu undefined dan seluruh daftar gagal
+    // dimuat (persis kejadian di screenshot: "Cannot read properties of
+    // undefined (reading 'pos')").
     var byUnit = {};
-    res.data.pos.forEach(function(p){ (byUnit[p.kodeUnit] = byUnit[p.kodeUnit] || []).push(p); });
-    var idxUnit = {}; res.data.units.forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
+    res.pos.forEach(function(p){ (byUnit[p.kodeUnit] = byUnit[p.kodeUnit] || []).push(p); });
+    var idxUnit = {}; res.units.forEach(function(u,i){ idxUnit[u.kodeUnit]=i; });
     var kodeUnitUrut = Object.keys(byUnit).sort(function(a,b){
       var ia = idxUnit.hasOwnProperty(a) ? idxUnit[a] : 9999;
       var ib = idxUnit.hasOwnProperty(b) ? idxUnit[b] : 9999;
@@ -3267,7 +3272,7 @@ function renderDaftarSelaluPisahMemorial(){
     });
     if(!kodeUnitUrut.length){ el.innerHTML = '<p class="text-muted small mb-0">Belum ada Pos. Buat dulu di Kelola Unit &amp; Pos.</p>'; return; }
     el.innerHTML = kodeUnitUrut.map(function(ku){
-      var namaUnit = (res.data.units.filter(function(u){return u.kodeUnit===ku;})[0]||{}).namaUnit || ku;
+      var namaUnit = (res.units.filter(function(u){return u.kodeUnit===ku;})[0]||{}).namaUnit || ku;
       var daftarPos = byUnit[ku];
       var semuaTercentang = daftarPos.every(function(p){ return p.selaluPisahMemorial; });
       var baris = daftarPos.map(function(p){
@@ -3296,7 +3301,7 @@ function toggleSelaluPisahMemorial(kodePos, dicentang){
 function toggleSelaluPisahMemorialUnit(kodeUnit, dicentang){
   gasCall('getUnitPosList', STATE.token).then(function(res){
     if(!res.success) return;
-    var daftarPos = res.data.pos.filter(function(p){ return p.kodeUnit===kodeUnit; });
+    var daftarPos = res.pos.filter(function(p){ return p.kodeUnit===kodeUnit; });
     Promise.all(daftarPos.map(function(p){ return gasCall('setSelaluPisahMemorial', p.kodePos, dicentang, STATE.token); }))
       .then(function(){ toast('success','Tersimpan untuk '+daftarPos.length+' Pos'); renderDaftarSelaluPisahMemorial(); });
   });
