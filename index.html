@@ -1678,14 +1678,16 @@ function renderRekeningKoranTable(){
   var d=0, k=0;
   tb.innerHTML = _rekKoranRows.map(function(r,i){
     d+=r.debet; k+=r.kredit;
-    return '<tr ondragover="rkDragOver(event)" ondragleave="rkDragLeave(event)" ondrop="rkDrop(event,\''+r.id+'\')" ondragend="rkDragEnd(event)">'
+    var belumVerifikasi = !r.kodePos;
+    var labelUnit = belumVerifikasi ? '<span class="text-muted" title="Belum diverifikasi/ditentukan Pos-nya — lihat menu Input Rekap Bulanan &rarr; Perlu Verifikasi">&mdash;</span>' : _gcEsc(r.kodeUnit||'');
+    return '<tr class="'+(belumVerifikasi?'table-warning':'')+'" ondragover="rkDragOver(event)" ondragleave="rkDragLeave(event)" ondrop="rkDrop(event,\''+r.id+'\')" ondragend="rkDragEnd(event)">'
       + '<td class="tx-col-icon">'+(i+1)+'</td>'
       + '<td class="no-print tx-drag-handle tx-col-icon" draggable="true" ondragstart="rkDragStart(event,\''+r.id+'\')" title="Tahan &amp; geser untuk urutkan"><i class="fas fa-grip-vertical"></i></td>'
       + '<td>'+r.tanggal+'</td>'
-      + '<td class="tx-col-clip" title="'+_gcEsc(r.keterangan||'')+'">'+_gcEsc(r.keterangan||'')+'</td>'
+      + '<td class="tx-col-clip" title="'+_gcEsc(r.keterangan||'')+'">'+(belumVerifikasi?'<i class="fas fa-triangle-exclamation text-warning me-1" title="Belum terverifikasi"></i>':'')+_gcEsc(r.keterangan||'')+'</td>'
       + '<td class="text-end">'+(r.debet?fmtRp(r.debet):'&mdash;')+'</td>'
       + '<td class="text-end">'+(r.kredit?fmtRp(r.kredit):'&mdash;')+'</td>'
-      + '<td class="tx-col-clip" title="'+_gcEsc(_rekKoranUnitNama[r.kodeUnit]||'')+'">'+_gcEsc(r.kodeUnit||'')+'</td>'
+      + '<td class="tx-col-clip" title="'+_gcEsc(_rekKoranUnitNama[r.kodeUnit]||'')+'">'+labelUnit+'</td>'
       + '<td class="no-print tx-aksi"><button class="btn btn-sm btn-outline-secondary me-1" onclick="editTransaksiRK(\''+r.id+'\')"><i class="fas fa-edit"></i></button>'
       + '<button class="btn btn-sm btn-outline-danger" onclick="hapusTransaksiRK(\''+r.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
   }).join('') || '<tr><td colspan="8" class="text-center text-muted">Belum ada data bulan ini</td></tr>';
