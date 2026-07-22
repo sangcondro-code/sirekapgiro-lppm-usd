@@ -3012,12 +3012,22 @@ function cetakKonsolidasi(){
     'table.t td.r{text-align:right;font-family:"Courier New",monospace;} table.t td.c{text-align:center;}',
     'table.t tfoot td{border-top:1px solid #000;border-bottom:1.5px solid #000;font-weight:bold;padding:4px 6px;background:#fff;}',
     'table.t tfoot td.r{text-align:right;font-family:"Courier New",monospace;}',
+    // PERBAIKAN: baris TOTAL (tfoot) itu, kalau tabelnya kepanjangan (lebih
+    // dari 1 halaman kertas, mis. 1 Pos punya puluhan transaksi), SECARA
+    // OTOMATIS diulang cetak oleh BROWSER di setiap potongan halaman --
+    // bukan cuma sekali di baris terakhir yang sebenarnya. "display:
+    // table-row-group" membuat tfoot diperlakukan sama seperti tbody biasa
+    // (tidak dianggap "footer" khusus oleh browser), jadi cuma tercetak
+    // SEKALI di posisi aslinya, tetap 1 TOTAL per Pos walau tabelnya
+    // terpotong ke beberapa halaman. thead (judul kolom) SENGAJA dibiarkan
+    // tetap terulang di tiap halaman -- itu justru membantu keterbacaan.
+    'table.t tfoot{display:table-row-group;}',
     '.doc-title{font-size:11pt;font-weight:bold;text-align:center;margin:2px 0 10px;}',
-    '.unit-h{font-weight:bold;font-size:10pt;background:#eee;padding:5px 8px;margin-top:4px;margin-bottom:6px;border:1px solid #000;}',
+    '.unit-h{font-weight:bold;font-size:10pt;background:#eee;padding:5px 8px;margin-top:4px;margin-bottom:6px;border:1px solid #000;page-break-after:avoid;}', // page-break-after:avoid -- supaya judul Unit tidak pernah tercetak sendirian di ujung halaman, terpisah dari tabel Pos pertamanya (halaman jadi kelihatan kosong)
     '.pos-h{font-weight:bold;font-size:8.7pt;padding:2px 2px 4px;text-transform:uppercase;margin-top:16px;}',
     '.pos-h:first-of-type{margin-top:0;}',
     '.pg{page-break-inside:avoid;}',
-    '.pgpos{page-break-inside:avoid;}', // supaya judul "REKAP <Pos>" tidak pernah tercetak terpisah dari tabelnya sendiri
+    '.pgpos{page-break-inside:avoid;}', // supaya judul "REKAP <Pos>" tidak pernah tercetak terpisah dari tabelnya sendiri (Pos dengan transaksi wajar/tidak terlalu banyak)
     '.pg.pb{page-break-before:always;}',
     '@page{ size:A4 portrait; margin:14mm 12mm 16mm; }',
     '@page{ @bottom-center{ content:"Halaman " counter(page) " dari " counter(pages); font-size:7pt; color:#000; } }',
