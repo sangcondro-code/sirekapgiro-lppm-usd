@@ -1344,8 +1344,16 @@ function _renderTxRow(r, i, kodePosDrag){
 // Urutkan array transaksi: pakai urutan MANUAL (kolom Urutan) kalau ada,
 // baru fallback ke tanggal — supaya baris yang belum pernah digeser tetap
 // tampil masuk akal (urut tanggal) sebelum sempat disusun manual.
+// PERBAIKAN: sebelumnya fungsi ini mengurutkan ulang pakai kolom "urutan"
+// (per-Pos) sebagai kunci utama -- sekarang kolom itu SUDAH TIDAK DITULIS
+// LAGI (lihat reorderTransaksi di backend: sekarang menulis ke UrutanKoran
+// supaya jadi 1 sumber kebenaran bersama Rekap Rekening Koran), jadi kalau
+// tetap dipakai di sini, isinya cuma nilai LAMA yang beku dan bisa
+// mengacaukan urutan yang sudah benar dari server. Data dari getRekapBulan()
+// sekarang sudah datang TERURUT BENAR dari server (fungsi filter() di
+// pemanggil menjaga urutan relatifnya) -- di sini cukup disalin apa adanya.
 function _urutkanTx(rows){
-  return rows.slice().sort(function(a,b){ return (a.urutan||0)-(b.urutan||0) || (a.tanggal||'').localeCompare(b.tanggal||''); });
+  return rows.slice();
 }
 // Urutkan daftar kodeUnit supaya konsisten di MANA SAJA ditampilkan (layar
 // "Semua Unit & Pos", layar Rekap Bulanan, maupun saat Cetak Rincian) — semua
