@@ -192,7 +192,6 @@
     <div class="nav-item active" data-view="dashboard" onclick="gotoView('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</div>
     <div class="nav-item" data-view="input" onclick="gotoView('input')"><i class="fas fa-edit"></i> Input Rekap Bulanan</div>
     <div class="nav-item admin-only" data-view="rekkoran" onclick="gotoView('rekkoran')"><i class="fas fa-list-ol"></i> Rekap Rekening Koran</div>
-    <div class="nav-item unit-only" data-view="pos" onclick="gotoView('pos')"><i class="fas fa-tags"></i> Kelola Pos</div>
     <div class="nav-item" data-view="konsolidasi" onclick="gotoView('konsolidasi')"><i class="fas fa-layer-group"></i> Rekap Konsolidasi</div>
     <div class="nav-item admin-only" data-view="memorial" onclick="gotoView('memorial')"><i class="fas fa-file-invoice"></i> Jurnal Memorial</div>
     <div class="nav-label admin-only">Administrasi</div>
@@ -1410,10 +1409,15 @@ function renderTransaksiTable(){
     return;
   }
 
-  if(STATE.role==='ADMIN'){
-    // Admin lihat SEMUA pos sekaligus tanpa perlu pilih dulu — tapi tetap
-    // dikelompokkan per Unit -> per Pos (bukan digabung jadi satu list rata).
-    document.getElementById('pos-aktif-nama').textContent = 'Semua Unit & Pos';
+  // PERBAIKAN: sebelumnya mode "lihat semua Pos sekaligus" (dikelompokkan
+  // per Unit->per Pos) cuma tersedia untuk role ADMIN -- role UNIT dipaksa
+  // pilih 1 Pos setiap kali lewat dropdown, tidak ada cara melihat semua
+  // Pos miliknya sekaligus dalam satu tampilan. Sekarang berlaku untuk
+  // SIAPA PUN (dicek dari STATE_posAktif===null, bukan role) -- data yang
+  // ditampilkan otomatis tetap cuma yang boleh diakses (sudah difilter dari
+  // server di getRekapBulan), jadi aman dipakai role UNIT juga.
+  if(STATE_posAktif === null){
+    document.getElementById('pos-aktif-nama').textContent = STATE.role==='ADMIN' ? 'Semua Unit & Pos' : 'Semua Pos Saya';
     wrapSatu.classList.add('d-none');
     wrapSemua.classList.remove('d-none');
 
@@ -1678,8 +1682,11 @@ function renderRekeningKoranTable(){
   var d=0, k=0;
   tb.innerHTML = _rekKoranRows.map(function(r,i){
     d+=r.debet; k+=r.kredit;
-    var belumVerifikasi = !r.kodePos;
-    var labelUnit = belumVerifikasi ? '<span class="text-muted" title="Belum diverifikasi/ditentukan Pos-nya — lihat menu Input Rekap Bulanan &rarr; Perlu Verifikasi">&mdash;</span>' : _gcEsc(r.kodeUnit||'');
+    var belumVerifikasi = r.sumber!=='tambahan' && !r.kodePos;
+    var labelUnit;
+    if(r.sumber==='tambahan') labelUnit = '<span class="badge bg-secondary" title="Item Non-Unit — bukan milik 1 Unit tertentu">Non-Unit</span>';
+    else if(belumVerifikasi) labelUnit = '<span class="text-muted" title="Belum diverifikasi/ditentukan Pos-nya — lihat menu Input Rekap Bulanan &rarr; Perlu Verifikasi">&mdash;</span>';
+    else labelUnit = _gcEsc(r.kodeUnit||'');
     return '<tr class="'+(belumVerifikasi?'table-warning':'')+'" ondragover="rkDragOver(event)" ondragleave="rkDragLeave(event)" ondrop="rkDrop(event,\''+r.id+'\')" ondragend="rkDragEnd(event)">'
       + '<td class="tx-col-icon">'+(i+1)+'</td>'
       + '<td class="no-print tx-drag-handle tx-col-icon" draggable="true" ondragstart="rkDragStart(event,\''+r.id+'\')" title="Tahan &amp; geser untuk urutkan"><i class="fas fa-grip-vertical"></i></td>'
@@ -1687,7 +1694,7 @@ function renderRekeningKoranTable(){
       + '<td class="tx-col-clip" title="'+_gcEsc(r.keterangan||'')+'">'+(belumVerifikasi?'<i class="fas fa-triangle-exclamation text-warning me-1" title="Belum terverifikasi"></i>':'')+_gcEsc(r.keterangan||'')+'</td>'
       + '<td class="text-end">'+(r.debet?fmtRp(r.debet):'&mdash;')+'</td>'
       + '<td class="text-end">'+(r.kredit?fmtRp(r.kredit):'&mdash;')+'</td>'
-      + '<td class="tx-col-clip" title="'+_gcEsc(_rekKoranUnitNama[r.kodeUnit]||'')+'">'+labelUnit+'</td>'
+      + '<td class="tx-col-clip" title="'+_gcEsc(r.sumber==='tambahan'?(r.namaPos||''):(_rekKoranUnitNama[r.kodeUnit]||''))+'">'+labelUnit+'</td>'
       + '<td class="no-print tx-aksi"><button class="btn btn-sm btn-outline-secondary me-1" onclick="editTransaksiRK(\''+r.id+'\')"><i class="fas fa-edit"></i></button>'
       + '<button class="btn btn-sm btn-outline-danger" onclick="hapusTransaksiRK(\''+r.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
   }).join('') || '<tr><td colspan="8" class="text-center text-muted">Belum ada data bulan ini</td></tr>';
@@ -1743,9 +1750,11 @@ function editTransaksiRK(id){
     var p2 = function(n){ return String(n).length<2 ? '0'+n : ''+n; };
     return { min: STATE.tahunAktif+'-'+p2(bulan)+'-01', max: STATE.tahunAktif+'-'+p2(bulan)+'-'+p2(akhir) };
   })() : { min:'', max:'' };
+  var isTambahan = r.sumber==='tambahan';
   Swal.fire({
-    title:'Edit Transaksi',
+    title: isTambahan ? 'Edit Item Non-Unit' : 'Edit Transaksi',
     html:'<div style="text-align:left;">'
+      +(isTambahan ? '<p class="text-muted small mb-2">Kategori: <b>'+_gcEsc(r.namaPos||'')+'</b> (ganti kategori lewat menu Input Rekap Bulanan &rarr; Input Non Unit)</p>' : '')
       +'<label class="form-label small mb-1">Tanggal</label><input type="date" id="ed-tgl" class="form-control form-control-sm mb-2" value="'+(r.tanggal||'')+'" min="'+rentangEd.min+'" max="'+rentangEd.max+'">'
       +'<label class="form-label small mb-1">Keterangan</label><input type="text" id="ed-ket" class="form-control form-control-sm mb-2" value="'+_gcEsc(r.keterangan||'')+'">'
       +'<div class="row g-2"><div class="col-6"><label class="form-label small mb-1">Debet</label><input type="text" inputmode="decimal" id="ed-debet" class="form-control form-control-sm text-end" value="'+fmtRp(r.debet)+'" oninput="formatAngkaLive(this)" onblur="finalisasiAngka(this)" onfocus="this.select()"></div>'
@@ -1755,8 +1764,10 @@ function editTransaksiRK(id){
     preConfirm:function(){
       var tgl = document.getElementById('ed-tgl').value;
       if(!tgl){ Swal.showValidationMessage('Tanggal wajib diisi.'); return false; }
-      return { kodePos:r.kodePos, tanggal:tgl, keterangan:document.getElementById('ed-ket').value,
+      var v = { tanggal:tgl, keterangan:document.getElementById('ed-ket').value,
                debet:angkaKeAngka(document.getElementById('ed-debet').value), kredit:angkaKeAngka(document.getElementById('ed-kredit').value) };
+      if(isTambahan) v.kodeKategori = r.kodeKategori; else v.kodePos = r.kodePos;
+      return v;
     }
   }).then(function(res){
     if(!res.isConfirmed) return;
@@ -1764,24 +1775,30 @@ function editTransaksiRK(id){
     var backup = idx>-1 ? Object.assign({}, _rekKoranRows[idx]) : null;
     if(idx>-1) Object.assign(_rekKoranRows[idx], res.value);
     renderRekeningKoranTable();
-    gasCall('updateTransaksi', STATE.tahunAktif, bulan, id, res.value, STATE.token).then(function(rr){
+    var rpc = isTambahan ? 'updateTambahan' : 'updateTransaksi';
+    gasCall(rpc, STATE.tahunAktif, bulan, id, res.value, STATE.token).then(function(rr){
       if(!rr.success){ if(backup && idx>-1) _rekKoranRows[idx]=backup; renderRekeningKoranTable(); toast('error', rr.message); return; }
       delete CACHE.rekap[STATE.tahunAktif + '_' + bulan]; // data yang sama juga tampil di "Input Rekap Bulanan" -> jangan sampai basi di sana (pakai bulan di HALAMAN INI, bukan filter halaman lain)
+      delete CACHE.tambahan[STATE.tahunAktif + '_' + bulan]; // juga tampil di "Input Non Unit"
       toast('success','Tersimpan');
     }).catch(function(){ if(backup && idx>-1) _rekKoranRows[idx]=backup; renderRekeningKoranTable(); toast('error','Gagal menyimpan (dikembalikan)'); });
   });
 }
 function hapusTransaksiRK(id){
-  Swal.fire({title:'Hapus transaksi ini?', icon:'warning', showCancelButton:true, confirmButtonText:'Hapus', confirmButtonColor:'#dc2626'}).then(function(res){
+  var r = _rekKoranRows.filter(function(d){return d.id===id;})[0];
+  var isTambahan = r && r.sumber==='tambahan';
+  Swal.fire({title:'Hapus '+(isTambahan?'item':'transaksi')+' ini?', icon:'warning', showCancelButton:true, confirmButtonText:'Hapus', confirmButtonColor:'#dc2626'}).then(function(res){
     if(!res.isConfirmed) return;
     var bulan = document.getElementById('sel-bulan-rekkoran').value;
     var idx = _rekKoranRows.findIndex(function(d){return d.id===id;});
     var backup = idx>-1 ? _rekKoranRows[idx] : null;
     if(idx>-1) _rekKoranRows.splice(idx,1);
     renderRekeningKoranTable();
-    gasCall('deleteTransaksi', STATE.tahunAktif, bulan, id, STATE.token).then(function(r){
-      if(!r.success){ if(backup) _rekKoranRows.splice(idx,0,backup); renderRekeningKoranTable(); toast('error', r.message); return; }
+    var rpc = isTambahan ? 'deleteTambahan' : 'deleteTransaksi';
+    gasCall(rpc, STATE.tahunAktif, bulan, id, STATE.token).then(function(r2){
+      if(!r2.success){ if(backup) _rekKoranRows.splice(idx,0,backup); renderRekeningKoranTable(); toast('error', r2.message); return; }
       delete CACHE.rekap[STATE.tahunAktif + '_' + bulan];
+      delete CACHE.tambahan[STATE.tahunAktif + '_' + bulan];
       toast('success','Terhapus');
     }).catch(function(){ if(backup) _rekKoranRows.splice(idx,0,backup); renderRekeningKoranTable(); toast('error','Gagal menghapus (dikembalikan)'); });
   });
@@ -2256,9 +2273,13 @@ function initRevPos(){
   } else {
     var pos = STATE.myPos || [];
     if(!pos.length){ wrap.innerHTML='<span class="text-muted small">Belum ada Pos</span>'; STATE_posAktif=null; return; }
-    STATE_posAktif = pos[0].kodePos;
+    // PERBAIKAN: tambahkan opsi "Semua Pos Saya" (STATE_posAktif=null) --
+    // sebelumnya role UNIT dipaksa pilih 1 Pos dulu, tidak ada cara melihat
+    // semua Pos miliknya sekaligus seperti yang bisa dilakukan Admin.
+    STATE_posAktif = null;
     wrap.innerHTML = '<label class="small text-muted mb-0">Lihat pos:</label>'
       + '<select class="form-select form-select-sm" style="width:auto;" id="rev-pos-select" onchange="revPilih(this.value)">'
+      + '<option value="">- Semua Pos Saya -</option>'
       + pos.map(function(p){ return '<option value="'+p.kodePos+'">'+_gcEsc(p.namaPos)+'</option>'; }).join('')
       + '</select>';
   }
