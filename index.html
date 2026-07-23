@@ -3111,7 +3111,16 @@ function cetakKonsolidasi(){
       var grp = unit.pos[kp], d=0, k=0;
       var rowsHtml = grp.rows.map(function(r,i){ d+=r.debet; k+=r.kredit; adaDetail = true;
         return '<tr><td class="c">'+(i+1)+'</td><td>'+r.tanggal+'</td><td>'+_gcEsc(r.keterangan||'')+'</td><td class="r">'+fmt2(r.debet)+'</td><td class="r">'+fmt2(r.kredit)+'</td></tr>'; }).join('');
-      halaman2 += '<div class="pgpos"><div class="pos-h">REKAP '+grp.nama+'</div>'
+      // PERBAIKAN: "jangan pecah" (pgpos) cuma realistis dipenuhi kalau
+      // tabelnya memang muat 1 halaman -- untuk Pos dengan puluhan/ratusan
+      // transaksi (mis. 68 baris QR Purchase), memaksa "jangan pecah" malah
+      // bikin browser mendorong SELURUH tabel itu ke halaman baru (karena
+      // tidak muat di sisa halaman ini), menyisakan halaman sebelumnya
+      // nyaris kosong. Ambang 30 baris dipilih aman (tabel segitu masih
+      // muat penuh 1 halaman A4 dengan font kecil di sini) -- di atas itu,
+      // dibiarkan mengalir & terpotong wajar antar halaman.
+      var bungkus = grp.rows.length <= 30 ? 'pgpos' : '';
+      halaman2 += '<div class="'+bungkus+'"><div class="pos-h">REKAP '+grp.nama+'</div>'
         +'<table class="t"><thead><tr><th class="c" style="width:6%;">No</th><th style="width:14%;">Tanggal</th><th>Keterangan</th><th class="r" style="width:18%;">Debet</th><th class="r" style="width:18%;">Kredit</th></tr></thead>'
         +'<tbody>'+(rowsHtml || '<tr><td colspan="5" class="c">Tidak ada data</td></tr>')+'</tbody>'
         +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table></div>';
@@ -3135,7 +3144,8 @@ function cetakKonsolidasi(){
       var d=0,k=0;
       var body = rows.map(function(r,i){ d+=r.debet; k+=r.kredit;
         return '<tr><td class="c">'+(i+1)+'</td><td>'+r.tanggal+'</td><td>'+_gcEsc(r.keterangan||'')+'</td><td class="r">'+fmt2(r.debet)+'</td><td class="r">'+fmt2(r.kredit)+'</td></tr>'; }).join('');
-      return '<div class="pgpos"><div class="pos-h">REKAP '+kat.namaKategori+'</div>'
+      var bungkusKat = rows.length <= 30 ? 'pgpos' : ''; // sama seperti halaman2 -- jangan paksa "jangan pecah" kalau tabelnya jelas tidak muat 1 halaman
+      return '<div class="'+bungkusKat+'"><div class="pos-h">REKAP '+kat.namaKategori+'</div>'
         +'<table class="t"><thead><tr><th class="c" style="width:6%;">No</th><th style="width:14%;">Tanggal</th><th>Keterangan</th><th class="r" style="width:18%;">Debet</th><th class="r" style="width:18%;">Kredit</th></tr></thead>'
         +'<tbody>'+body+'</tbody>'
         +'<tfoot><tr><td colspan="3">TOTAL</td><td class="r">'+fmt2(d)+'</td><td class="r">'+fmt2(k)+'</td></tr></tfoot></table></div>';
