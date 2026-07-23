@@ -2236,36 +2236,31 @@ function gcSimpanSemua(){
 
   var btn = document.getElementById('gc-btn-simpan');
   btnBusy(btn, true);
-  // PERBAIKAN PERFORMA: sebelumnya batch per-Pos dikirim BERGILIRAN, tiap
-  // batch = 1 request HTTP terpisah ke Apps Script (mahal di hosting luar
-  // seperti GitHub Pages, karena tiap fetch() bayar round-trip PENUH +
-  // redirect internal Google). Sekarang SEMUA batch digabung jadi SATU
-  // request lewat gasCallBatch (mode "calls" di doPost/Code.gs) — hasilnya
-  // dikembalikan dalam urutan yang sama, jadi cukup 1x tunggu jaringan
-  // walau isian tersebar ke banyak Pos sekaligus.
-  var adaBV = false;
-  var calls = tugas.map(function(t){
-    var isBV = (t.kodePos===POS_BELUM_JELAS); if(isBV) adaBV=true;
-    var idKey = _idemKey('gc'+bulan+'_'+STATE.tahunAktif+'_'+t.kodePos, t.baris);
-    return isBV
-      ? { fn:'tambahBanyakTransaksiBelumVerifikasi', args:[STATE.tahunAktif, bulan, t.baris, STATE.token, idKey] }
-      : { fn:'importTransaksiBulk', args:[STATE.tahunAktif, bulan, t.kodePos, t.baris, STATE.token, idKey] };
-  });
-  gasCallBatch(calls).then(function(hasilBatch){
+  // PERBAIKAN PERFORMA PENTING: sebelumnya tiap kelompok Pos dikirim sebagai
+  // PANGGILAN TERPISAH (walau sudah dikirim paralel dari browser) -- di sisi
+  // SERVER, setiap panggilan tetap harus antre kunci LockService yang SAMA
+  // (global, bukan per-Pos), jadi kalau isian tersebar ke banyak Pos
+  // berbeda (mis. 19 baris utk 8 Pos), total waktu tunggu = 8x waktu 1 kali
+  // simpan, BUKAN cuma 1x seperti yang diharapkan dari "dikirim paralel".
+  // Ini juga bikin peluang tabrakan dengan Admin LAIN yang menyimpan
+  // bersamaan jadi lebih besar (lock dipegang bergantian lebih lama total).
+  // Sekarang SEMUA kelompok Pos dikirim dalam SATU panggilan gabungan --
+  // server cukup 1x kunci + 1x tulis untuk SEMUA Pos sekaligus.
+  var adaBV = tugas.some(function(t){ return t.kodePos===POS_BELUM_JELAS; });
+  var tugasKirim = tugas.map(function(t){ return { kodePos: t.kodePos===POS_BELUM_JELAS ? '' : t.kodePos, baris:t.baris }; });
+  var idKeyGabungan = _idemKey('gcgab'+bulan+'_'+STATE.tahunAktif, tugasKirim);
+  gasCall('simpanTransaksiGabungan', STATE.tahunAktif, bulan, tugasKirim, STATE.token, idKeyGabungan).then(function(res){
     btnBusy(btn, false);
-    var totalMasuk = 0, pesanError = [];
-    hasilBatch.forEach(function(rr, i){
-      if(!rr || !rr.success){ pesanError.push((rr && rr.message) || 'Gagal untuk pos '+tugas[i].kodePos); return; }
-      totalMasuk += (rr.jumlah || tugas[i].baris.length);
-    });
+    if(!res.success){ toast('error', res.message); return; }
+    var totalMasuk = res.jumlah || 0;
     if(totalMasuk > 0){
       initGridCepat();
       delete CACHE.rekap[_rekapCacheKey()];
       loadRekapBulan();
       if(adaBV) loadPerluVerifikasi();
     }
-    if(pesanError.length){
-      toast('error', (totalMasuk>0 ? totalMasuk+' transaksi tersimpan, tapi ' : '') + pesanError.length+' batch gagal: '+pesanError[0]);
+    if(res.message){
+      toast('error', totalMasuk+' transaksi tersimpan, tapi '+res.message);
     } else {
       toast('success', totalMasuk + ' transaksi tersimpan');
     }
