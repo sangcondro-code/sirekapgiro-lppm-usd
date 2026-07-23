@@ -893,8 +893,16 @@ function afterLogin(){
   var badge = document.getElementById('nav-role-badge');
   badge.textContent = STATE.role;
   badge.className = 'badge-role ' + (STATE.role==='ADMIN' ? 'badge-admin' : 'badge-unit');
-  document.querySelectorAll('.admin-only').forEach(function(el){ el.style.display = (STATE.role==='ADMIN') ? '' : 'none'; });
-  document.querySelectorAll('.unit-only').forEach(function(el){ el.style.display = (STATE.role==='ADMIN') ? 'none' : ''; });
+  // PERBAIKAN BUG: sebelumnya pakai el.style.display='none' -- ini KALAH
+  // kalau elemennya juga punya class Bootstrap seperti d-flex/d-grid, yang
+  // ditulis dengan "!important" (mis. #input-mode-toggle, class="d-flex
+  // ... admin-only"). Akibatnya elemen itu TETAP kelihatan untuk role UNIT
+  // walau seharusnya disembunyikan. Sekarang pakai classList d-none (juga
+  // "!important" bawaan Bootstrap, jadi menang telak lawan class display
+  // apa pun), sekaligus lebih aman untuk SEMUA elemen admin-only/unit-only
+  // yang mungkin ditambah lagi nanti.
+  document.querySelectorAll('.admin-only').forEach(function(el){ el.classList.toggle('d-none', STATE.role!=='ADMIN'); });
+  document.querySelectorAll('.unit-only').forEach(function(el){ el.classList.toggle('d-none', STATE.role==='ADMIN'); });
 
   // 1) Tampilkan dulu dari cache lokal kalau ada (instan, tanpa spinner)
   var cachedInit = lsGet('init_' + STATE.username);
@@ -2547,7 +2555,7 @@ function loadKonsolidasi(){
   if(!bulan) return;
   // Bagian bank-level (Rekonsiliasi Bank & REKAP PER POS/item non-unit) cuma
   // relevan & bisa diisi oleh Admin; user unit cukup lihat rincian unitnya sendiri.
-  document.querySelectorAll('#view-konsolidasi .konso-admin-only').forEach(function(el){ el.style.display = (STATE.role==='ADMIN') ? '' : 'none'; });
+  document.querySelectorAll('#view-konsolidasi .konso-admin-only').forEach(function(el){ el.classList.toggle('d-none', STATE.role!=='ADMIN'); });
   var namaBulanLabel = BULAN_NAMA[Number(bulan)-1] + ' ' + STATE.tahunAktif;
   document.getElementById('rp-bulan-label').textContent = namaBulanLabel;
   document.getElementById('rk-bulan-label').textContent = namaBulanLabel;
@@ -3005,7 +3013,7 @@ function cetakKonsolidasi(){
     // terpotong ke beberapa halaman. thead (judul kolom) SENGAJA dibiarkan
     // tetap terulang di tiap halaman -- itu justru membantu keterbacaan.
     'table.t tfoot{display:table-row-group;}',
-    '.doc-title{font-size:11pt;font-weight:bold;text-align:center;margin:2px 0 10px;}',
+    '.doc-title{font-size:11pt;font-weight:bold;text-align:center;margin:2px 0 10px;page-break-after:avoid;}', // page-break-after:avoid -- sebelumnya judul dokumen ("REKAP REKENING GIRO...") masih bisa terpisah dari judul Unit persis di bawahnya, menyisakan 1 halaman nyaris kosong
     '.unit-h{font-weight:bold;font-size:10pt;background:#eee;padding:5px 8px;margin-top:4px;margin-bottom:6px;border:1px solid #000;page-break-after:avoid;}', // page-break-after:avoid -- supaya judul Unit tidak pernah tercetak sendirian di ujung halaman, terpisah dari tabel Pos pertamanya (halaman jadi kelihatan kosong)
     '.pos-h{font-weight:bold;font-size:8.7pt;padding:2px 2px 4px;text-transform:uppercase;margin-top:16px;}',
     '.pos-h:first-of-type{margin-top:0;}',
