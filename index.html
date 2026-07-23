@@ -3013,8 +3013,23 @@ function cetakKonsolidasi(){
     // terpotong ke beberapa halaman. thead (judul kolom) SENGAJA dibiarkan
     // tetap terulang di tiap halaman -- itu justru membantu keterbacaan.
     'table.t tfoot{display:table-row-group;}',
-    '.doc-title{font-size:11pt;font-weight:bold;text-align:center;margin:2px 0 10px;page-break-after:avoid;}', // page-break-after:avoid -- sebelumnya judul dokumen ("REKAP REKENING GIRO...") masih bisa terpisah dari judul Unit persis di bawahnya, menyisakan 1 halaman nyaris kosong
-    '.unit-h{font-weight:bold;font-size:10pt;background:#eee;padding:5px 8px;margin-top:4px;margin-bottom:6px;border:1px solid #000;page-break-after:avoid;}', // page-break-after:avoid -- supaya judul Unit tidak pernah tercetak sendirian di ujung halaman, terpisah dari tabel Pos pertamanya (halaman jadi kelihatan kosong)
+    '.doc-title{font-size:11pt;font-weight:bold;text-align:center;margin:2px 0 10px;}',
+    // PERBAIKAN: sebelumnya dicoba "rantai" page-break-after:avoid di
+    // doc-title MAUPUN unit-h (judul dokumen nempel ke judul Unit, judul
+    // Unit nempel ke tabel Pos pertama) -- ternyata kombinasi 2 lapis ini
+    // JUSTRU saling mengunci: kalau tabel Pos PERTAMA di Unit itu besar
+    // (mis. 68 baris), browser tidak bisa memuaskan ATURAN "unit-h harus
+    // nempel ke tabel besar itu" DI HALAMAN MANA PUN (karena tabelnya jelas
+    // tidak muat penuh di 1 halaman), jadi dia mendorong SELURUH rantai
+    // (judul dokumen + judul Unit) ke halaman baru berulang-ulang --
+    // hasilnya malah tetap ada halaman kosong. Sekarang cukup dibiarkan
+    // mengalir wajar; risiko kecilnya cuma sesekali judul dekat ke ujung
+    // halaman (bukan cacat besar) -- jauh lebih baik daripada halaman
+    // kosong penuh. Proteksi tetap ada di level yang MASIH realistis:
+    // .pgpos (1 judul+tabel Pos individual jangan pecah -- ini aman selama
+    // 1 Pos tidak lebih besar dari 1 halaman penuh, yang jauh lebih jarang
+    // terjadi dibanding "Unit ini py tabel besar di urutan pertama").
+    '.unit-h{font-weight:bold;font-size:10pt;background:#eee;padding:5px 8px;margin-top:4px;margin-bottom:6px;border:1px solid #000;}',
     '.pos-h{font-weight:bold;font-size:8.7pt;padding:2px 2px 4px;text-transform:uppercase;margin-top:16px;}',
     '.pos-h:first-of-type{margin-top:0;}',
     '.pg{page-break-inside:avoid;}',
@@ -3132,7 +3147,14 @@ function cetakKonsolidasi(){
     }
   }
 
-  var fullHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rekap Giro '+namaBulan+' '+STATE.tahunAktif+'</title><style>'+css+'</style></head><body>'
+  // Identitas Admin/Unit disisipkan ke judul dokumen -- ini yang dipakai
+  // browser sebagai NAMA FILE DEFAULT saat "Save as PDF", supaya langsung
+  // jelas dari namanya file itu punya siapa tanpa perlu buka isinya dulu.
+  var identitasCetak = STATE.role==='ADMIN' ? 'Admin' : (function(){
+    var namaUnit = (STATE.myUnits||[]).map(function(u){ return u.namaUnit; }).filter(Boolean);
+    return namaUnit.length ? namaUnit.join('+').replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,'_') : 'Unit';
+  })();
+  var fullHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rekap_Giro_'+identitasCetak+'_'+namaBulan+'_'+STATE.tahunAktif+'</title><style>'+css+'</style></head><body>'
     + kop + halaman1 + halaman2 + halaman3 + footer + '</body></html>';
 
   var frame = document.createElement('iframe');
